@@ -6,17 +6,20 @@ Start a complete DICOM network with a single command.
 ## Quick Start
 
 ```bash
-# 1. Copy default configuration
-cp env.default .env
+# 1. Start all services (auto-configures .env if needed)
+./pacs.sh up
 
-# 2. Build and start all services
-docker compose up -d --build
+# 2. Run the full test suite
+./pacs.sh test
 
-# 3. Run the full test suite
-docker compose exec test-client /tests/test-all.sh
+# 3. Check service status
+./pacs.sh status
 ```
 
 All DICOM operations (C-ECHO, C-STORE, C-FIND, C-MOVE) are tested automatically.
+
+> **Note:** The project works out of the box — `env.default` is used as fallback when
+> `.env` doesn't exist. Copy to `.env` only if you need custom values: `cp env.default .env`
 
 ## Architecture
 
@@ -53,22 +56,44 @@ Host Machine
 All services use a single Docker image (`debian:bookworm-slim` + DCMTK 3.6.7).
 The `ROLE` environment variable selects which service to run.
 
+## CLI Wrapper (`pacs.sh`)
+
+A unified CLI script wraps all common operations:
+
+| Command | Action |
+|---------|--------|
+| `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
+| `./pacs.sh down` | Stop all services |
+| `./pacs.sh status` | Show service health, ports, and AE titles |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`) |
+| `./pacs.sh logs [service]` | Tail logs (all or specific service) |
+| `./pacs.sh shell` | Interactive bash into test-client container |
+| `./pacs.sh reset` | Wipe volumes and restart fresh |
+| `./pacs.sh clean` | Remove all containers, images, and volumes |
+| `./pacs.sh echo [host] [port]` | Quick C-ECHO connectivity check |
+| `./pacs.sh help` | Show usage with examples |
+
+All `docker compose` commands still work directly if you prefer.
+
 ## Usage
 
 ### Start and Stop
 
 ```bash
-# Start all services
+# Start all services (recommended)
+./pacs.sh up
+
+# Or use docker compose directly
 docker compose up -d
 
 # Start specific services only
 docker compose up -d pacs-server test-client
 
 # View logs
-docker compose logs -f pacs-server
+./pacs.sh logs pacs-server
 
 # Stop all services (keep data)
-docker compose down
+./pacs.sh down
 
 # Stop and remove all data
 docker compose down -v
@@ -77,6 +102,9 @@ docker compose down -v
 ### C-ECHO (Connectivity Test)
 
 ```bash
+# Quick check via pacs.sh (auto-detects host/container)
+./pacs.sh echo localhost 11112
+
 # From test-client container
 docker compose exec test-client \
     echoscu -v -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112
@@ -154,7 +182,10 @@ docker compose exec storescp-receiver ls -la /dicom/received/
 ### Interactive Shell
 
 ```bash
-# Open a shell in the test-client container
+# Open a shell via pacs.sh
+./pacs.sh shell
+
+# Or use docker compose directly
 docker compose exec test-client bash
 
 # All DCMTK tools are available:
@@ -192,16 +223,16 @@ Then rebuild: `docker compose up -d --build pacs-server`
 ### Run All Tests
 
 ```bash
-docker compose exec test-client /tests/test-all.sh
+./pacs.sh test
 ```
 
 ### Run Individual Tests
 
 ```bash
-docker compose exec test-client /tests/test-echo.sh    # Connectivity
-docker compose exec test-client /tests/test-store.sh   # Image archival
-docker compose exec test-client /tests/test-find.sh    # Query
-docker compose exec test-client /tests/test-move.sh    # Retrieval
+./pacs.sh test echo     # Connectivity
+./pacs.sh test store    # Image archival
+./pacs.sh test find     # Query
+./pacs.sh test move     # Retrieval
 ```
 
 ### Test Data
@@ -228,7 +259,8 @@ docker compose restart test-client
 
 ### Environment Variables
 
-Copy `env.default` to `.env` and edit:
+The project uses `env.default` as the default configuration. To customize, copy
+to `.env` and edit (`.env` takes precedence when both exist):
 
 ```bash
 cp env.default .env
@@ -269,6 +301,7 @@ Key sections:
 
 ```
 dcmtk_docker/
+├── pacs.sh                             # CLI wrapper (./pacs.sh help)
 ├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK
 ├── docker-compose.yml                  # 4 services, 1 network, 3 volumes
 ├── env.default                         # Default environment values (copy to .env)
@@ -296,24 +329,25 @@ dcmtk_docker/
     ├── 01_research_dcmtk_dicom.md
     ├── 02_research_docker_approaches.md
     ├── 03_architecture_design.md
-    └── 04_work_plan.md
+    ├── 04_work_plan.md
+    └── 05_usage_guide.md
 ```
 
 ## Troubleshooting
 
 ### "Association rejected" / "Connection refused"
 
-1. **Check the service is running**: `docker compose ps` — all services should show "Up" or "healthy"
+1. **Check the service is running**: `./pacs.sh status` — all services should show "healthy"
 2. **Check the AE Title**: DICOM AE Titles are case-sensitive. Use exactly `DCMTK_PACS`, not `dcmtk_pacs`
 3. **Check the port**: All containers listen on internal port `11112`. Host ports differ (11112, 11113, 11114)
 4. **Check the network**: Services must be on the same Docker network (`dicom-net`)
 
 ```bash
 # Verify service health
-docker compose ps
+./pacs.sh status
 
 # Check PACS logs
-docker compose logs pacs-server
+./pacs.sh logs pacs-server
 
 # Test TCP connectivity
 docker compose exec test-client nc -zv pacs-server 11112
@@ -361,6 +395,9 @@ docker compose exec test-client \
 
 ```bash
 # Full reset: stop containers, remove volumes, rebuild
+./pacs.sh reset
+
+# Or manually:
 docker compose down -v
 docker compose up -d --build
 ```

@@ -41,28 +41,35 @@ Optional (for host-side DICOM operations):
 # Clone or navigate to the project
 cd dcmtk_docker
 
-# Copy default configuration
-cp env.default .env
-
-# Build the Docker image and start all services
-docker compose up -d --build
+# Start all services (auto-creates .env from env.default if needed)
+./pacs.sh up
 ```
+
+The `up` command automatically:
+1. Copies `env.default` to `.env` if `.env` doesn't exist
+2. Builds the Docker image and starts all 4 services
+3. Waits for health checks to pass
+4. Displays a status table showing service health, ports, and AE titles
+
+> **Note:** Even without running `./pacs.sh up`, `docker compose` commands work
+> directly — the `env_file` directive in `docker-compose.yml` reads `env.default`
+> as a fallback when `.env` doesn't exist.
 
 ### Verify the Environment
 
 ```bash
-# Check all services are running
-docker compose ps
+# Check service status
+./pacs.sh status
 
 # Expected output:
-# NAME               SERVICE            STATUS
-# pacs-server        pacs-server        running (healthy)
-# pacs-server-2      pacs-server-2      running (healthy)
-# storescp-receiver  storescp-receiver  running (healthy)
-# test-client        test-client        running
+# SERVICE              STATUS       AE TITLE       PORT
+# pacs-server          healthy      DCMTK_PACS     11112
+# pacs-server-2        healthy      DCMTK_PAC2     11113
+# storescp-receiver    healthy      STORE_SCP      11114
+# test-client          running      TEST_SCU       -
 
 # Run the full test suite
-docker compose exec test-client /tests/test-all.sh
+./pacs.sh test
 ```
 
 ### What Happens on Startup
@@ -80,10 +87,32 @@ docker compose exec test-client /tests/test-all.sh
 
 ## 3. Service Management
 
+### CLI Wrapper (`pacs.sh`)
+
+The `pacs.sh` script wraps all common operations into short subcommands:
+
+| Command | Action |
+|---------|--------|
+| `./pacs.sh up` | Auto-setup `.env`, build & start, wait for health |
+| `./pacs.sh down` | Stop all services |
+| `./pacs.sh status` | Show service health, ports, and AE titles |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`) |
+| `./pacs.sh logs [service]` | Tail logs (all or specific service) |
+| `./pacs.sh shell` | Interactive bash into test-client container |
+| `./pacs.sh reset` | Wipe volumes and restart fresh |
+| `./pacs.sh clean` | Remove all containers, images, and volumes |
+| `./pacs.sh echo [host] [port]` | Quick C-ECHO connectivity check |
+| `./pacs.sh help` | Show usage with examples |
+
+All `docker compose` commands still work directly if preferred.
+
 ### Starting Services
 
 ```bash
-# Start all services
+# Start all services (recommended)
+./pacs.sh up
+
+# Or use docker compose directly
 docker compose up -d
 
 # Start specific services
@@ -97,7 +126,7 @@ docker compose up -d --build
 
 ```bash
 # Stop all services (volumes preserved)
-docker compose down
+./pacs.sh down
 
 # Stop and remove all data volumes
 docker compose down -v
@@ -109,14 +138,11 @@ docker compose stop pacs-server-2
 ### Viewing Logs
 
 ```bash
-# All services
-docker compose logs
-
-# Follow logs in real-time
-docker compose logs -f
+# All services (follow mode)
+./pacs.sh logs
 
 # Specific service
-docker compose logs -f pacs-server
+./pacs.sh logs pacs-server
 
 # Last 50 lines
 docker compose logs --tail 50 pacs-server
@@ -125,21 +151,21 @@ docker compose logs --tail 50 pacs-server
 ### Service Health
 
 ```bash
-# Check status and health
-docker compose ps
+# Status table with health, ports, and AE titles
+./pacs.sh status
 
 # Manual health check
-docker compose exec test-client echoscu pacs-server 11112
+./pacs.sh echo localhost 11112
 ```
 
 ### Restarting Services
 
 ```bash
+# Fresh restart (wipe volumes and rebuild)
+./pacs.sh reset
+
 # Restart a single service
 docker compose restart pacs-server
-
-# Restart all
-docker compose restart
 
 # Force recreate (applies config changes)
 docker compose up -d --force-recreate
@@ -472,7 +498,17 @@ wait
 - name: Run PACS integration tests
   run: |
     cd dcmtk_docker
-    cp env.default .env
+    ./pacs.sh up
+    ./pacs.sh test
+    ./pacs.sh clean
+```
+
+Or using `docker compose` directly (no `.env` copy needed thanks to `env_file` fallback):
+
+```yaml
+- name: Run PACS integration tests
+  run: |
+    cd dcmtk_docker
     docker compose up -d --build
     docker compose exec -T test-client /tests/test-all.sh
     docker compose down -v
@@ -665,24 +701,18 @@ jobs:
 
       - name: Start PACS environment
         working-directory: dcmtk_docker
-        run: |
-          cp env.default .env
-          docker compose up -d --build
-          # Wait for health checks
-          docker compose exec -T test-client \
-              /usr/local/bin/wait-for-pacs.sh pacs-server 11112 DCMTK_PACS 30 2
+        run: ./pacs.sh up
 
       - name: Run DICOM tests
         working-directory: dcmtk_docker
-        run: |
-          docker compose exec -T test-client /tests/test-all.sh
+        run: ./pacs.sh test
 
       - name: Collect logs on failure
         if: failure()
         working-directory: dcmtk_docker
         run: |
           docker compose logs > pacs-logs.txt
-          docker compose ps
+          ./pacs.sh status
 
       - name: Upload logs
         if: failure()
@@ -694,7 +724,7 @@ jobs:
       - name: Cleanup
         if: always()
         working-directory: dcmtk_docker
-        run: docker compose down -v
+        run: ./pacs.sh clean
 ```
 
 #### GitLab CI
@@ -710,13 +740,10 @@ pacs-integration:
     DOCKER_TLS_CERTDIR: "/certs"
   script:
     - cd dcmtk_docker
-    - cp env.default .env
-    - docker compose up -d --build
-    - docker compose exec -T test-client
-        /usr/local/bin/wait-for-pacs.sh pacs-server 11112 DCMTK_PACS 30 2
-    - docker compose exec -T test-client /tests/test-all.sh
+    - ./pacs.sh up
+    - ./pacs.sh test
   after_script:
-    - cd dcmtk_docker && docker compose down -v
+    - cd dcmtk_docker && ./pacs.sh clean
 ```
 
 ---
@@ -726,14 +753,14 @@ pacs-integration:
 ### Quick Diagnosis
 
 ```bash
-# 1. Are all containers running?
-docker compose ps
+# 1. Are all containers running and healthy?
+./pacs.sh status
 
 # 2. Any errors in logs?
-docker compose logs --tail 20
+./pacs.sh logs
 
 # 3. Can test-client reach PACS?
-docker compose exec test-client echoscu -v pacs-server 11112
+./pacs.sh echo localhost 11112
 
 # 4. Is config correct?
 docker compose exec pacs-server cat /tmp/dcmqrscp.cfg
@@ -851,7 +878,7 @@ docker compose exec test-client \
 
 ```bash
 # Test all SCP endpoints
-docker compose exec test-client /tests/test-echo.sh
+./pacs.sh test echo
 ```
 
 ### Scenario 2: End-to-End Store and Query
@@ -911,8 +938,14 @@ findscu -v -S -aet MY_APP -aec DCMTK_PACS localhost 11112 \
 ### Scenario 5: Automated Test Suite
 
 ```bash
-# Run everything
-docker compose exec test-client /tests/test-all.sh
+# Run all tests
+./pacs.sh test
+
+# Run specific suite
+./pacs.sh test echo
+./pacs.sh test store
+./pacs.sh test find
+./pacs.sh test move
 
 # Expected output:
 # ========================================
