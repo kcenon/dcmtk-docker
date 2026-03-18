@@ -1,0 +1,23 @@
+# Environment
+.env
+
+# DICOM data (generated at runtime)
+data/dicom-output/
+data/received/
+
+# Docker volumes
+volumes/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log

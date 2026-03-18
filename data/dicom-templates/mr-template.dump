@@ -1,0 +1,36 @@
+# MR Image DICOM Template
+# Used as reference for dump2dcm. Actual generation uses generate-test-data.sh.
+# Placeholders: PATIENT_NAME, PATIENT_ID, PATIENT_SEX, STUDY_UID, STUDY_DATE,
+#               ACCESSION, SERIES_UID, SOP_UID, INSTANCE_NUMBER, SERIES_DESC
+
+# File Meta Information
+(0002,0001) OB 00\01
+(0002,0002) UI =MRImageStorage
+(0002,0003) UI [SOP_UID]
+(0002,0010) UI =LittleEndianExplicit
+
+# Patient Module
+(0010,0010) PN [PATIENT_NAME]
+(0010,0020) LO [PATIENT_ID]
+(0010,0040) CS [PATIENT_SEX]
+
+# General Study Module
+(0008,0020) DA [STUDY_DATE]
+(0008,0030) TM [120000]
+(0008,0050) SH [ACCESSION]
+(0008,1030) LO [MR Brain]
+(0020,000D) UI [STUDY_UID]
+(0020,0010) SH [STUDY_ID]
+
+# General Series Module
+(0008,0060) CS [MR]
+(0008,103E) LO [SERIES_DESC]
+(0020,000E) UI [SERIES_UID]
+(0020,0011) IS [1]
+
+# General Image Module
+(0020,0013) IS [INSTANCE_NUMBER]
+
+# SOP Common Module
+(0008,0016) UI =MRImageStorage
+(0008,0018) UI [SOP_UID]

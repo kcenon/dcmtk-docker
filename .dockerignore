@@ -1,0 +1,15 @@
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# Environment (used by Docker Compose, not build)
+.env
+
+# Test data and scripts (bind-mounted at runtime, not baked into image)
+data/
+tests/

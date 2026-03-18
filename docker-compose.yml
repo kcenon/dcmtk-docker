@@ -1,0 +1,135 @@
+services:
+  # ── Primary PACS Server ────────────────────────────
+  # Full PACS with C-ECHO, C-STORE, C-FIND, C-MOVE via dcmqrscp
+  pacs-server:
+    build: .
+    container_name: pacs-server
+    environment:
+      - ROLE=pacs-server
+      - AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
+      - DICOM_PORT=${DICOM_PORT:-11112}
+      - STORAGE_DIR=/dicom/db
+      - MAX_PDU_SIZE=${MAX_PDU_SIZE:-16384}
+      - MAX_ASSOCIATIONS=${MAX_ASSOCIATIONS:-16}
+      - MAX_STUDIES=${MAX_STUDIES:-200}
+      - MAX_BYTES_PER_STUDY=${MAX_BYTES_PER_STUDY:-1024mb}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - GENERATE_TEST_DATA=${GENERATE_TEST_DATA:-true}
+      - TEST_DATA_DIR=/dicom/testdata
+      - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
+      # Peer configuration for HostTable
+      - PACS2_AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
+      - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
+      - TEST_SCU_AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
+      - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary.cfg.template
+    ports:
+      - "${PACS1_HOST_PORT:-11112}:11112"
+    volumes:
+      - pacs-data:/dicom/db
+      - ./config:/etc/dcmtk:ro
+    networks:
+      - dicom-net
+    healthcheck:
+      test: ["CMD", "echoscu", "localhost", "11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Secondary PACS Server ──────────────────────────
+  # Second PACS instance for multi-PACS testing scenarios
+  pacs-server-2:
+    build: .
+    container_name: pacs-server-2
+    environment:
+      - ROLE=pacs-server
+      - AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
+      - DICOM_PORT=${DICOM_PORT:-11112}
+      - STORAGE_DIR=/dicom/db
+      - MAX_PDU_SIZE=${MAX_PDU_SIZE:-16384}
+      - MAX_ASSOCIATIONS=${MAX_ASSOCIATIONS:-16}
+      - MAX_STUDIES=${MAX_STUDIES:-200}
+      - MAX_BYTES_PER_STUDY=${MAX_BYTES_PER_STUDY:-1024mb}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - GENERATE_TEST_DATA=false
+      # Peer configuration for HostTable
+      - PACS1_AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
+      - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
+      - TEST_SCU_AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
+      - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-secondary.cfg.template
+    ports:
+      - "${PACS2_HOST_PORT:-11113}:11112"
+    volumes:
+      - pacs2-data:/dicom/db
+      - ./config:/etc/dcmtk:ro
+    networks:
+      - dicom-net
+    healthcheck:
+      test: ["CMD", "echoscu", "localhost", "11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Store SCP Receiver (C-MOVE destination) ────────
+  # Lightweight receiver for C-MOVE retrieval testing
+  storescp-receiver:
+    build: .
+    container_name: storescp-receiver
+    environment:
+      - ROLE=storescp
+      - AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
+      - DICOM_PORT=${DICOM_PORT:-11112}
+      - STORAGE_DIR=/dicom/received
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    ports:
+      - "${STORESCP_HOST_PORT:-11114}:11112"
+    volumes:
+      - received-data:/dicom/received
+    networks:
+      - dicom-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ── Test Client ────────────────────────────────────
+  # Interactive container with all DCMTK SCU tools
+  test-client:
+    build: .
+    container_name: test-client
+    environment:
+      - ROLE=test-client
+      - AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
+      - PACS_HOST=pacs-server
+      - PACS_PORT=11112
+      - PACS_AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
+      - PACS2_HOST=pacs-server-2
+      - PACS2_AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
+      - STORESCP_HOST=storescp-receiver
+      - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
+      - GENERATE_TEST_DATA=${GENERATE_TEST_DATA:-true}
+      - TEST_DATA_DIR=/dicom/testdata
+      - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
+    volumes:
+      - ./data:/dicom/testdata
+      - ./tests:/tests:ro
+    networks:
+      - dicom-net
+    depends_on:
+      pacs-server:
+        condition: service_healthy
+
+networks:
+  dicom-net:
+    driver: bridge
+
+volumes:
+  pacs-data:
+  pacs2-data:
+  received-data:
