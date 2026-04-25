@@ -29,6 +29,7 @@ DCMTK_LOG_LEVEL=$(map_log_level)
 
 # ── Logging helpers ──────────────────────────────────
 log_info()  { echo "[entrypoint] INFO:  $*"; }
+log_warn()  { echo "[entrypoint] WARN:  $*" >&2; }
 log_error() { echo "[entrypoint] ERROR: $*" >&2; }
 
 # ── Generate test data ───────────────────────────────
@@ -57,6 +58,13 @@ start_pacs_server() {
     else
         log_error "Config template not found: ${CONFIG_TEMPLATE}"
         exit 1
+    fi
+
+    # Security check: warn if rendered config uses 'ANY' Peers
+    # (test default; not safe for production - see config/dcmqrscp-production.cfg.example)
+    if grep -Eq '^[[:space:]]*[^#].*[[:space:]]ANY[[:space:]]*$' /tmp/dcmqrscp.cfg; then
+        log_warn "dcmqrscp AETable uses 'ANY' Peers - any SCU may connect without AE Title verification."
+        log_warn "This is TEST-ONLY. For production, see config/dcmqrscp-production.cfg.example."
     fi
 
     # Generate test data if enabled
