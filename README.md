@@ -255,6 +255,13 @@ rm -rf data/ct data/mr data/cr
 docker compose restart test-client
 ```
 
+> **Note:** The `pacs-server` indexes test DICOM files into its database on
+> first startup and writes a marker file at `<storage>/<AE_TITLE>/.indexed`
+> to skip re-indexing on subsequent restarts. After adding new DICOM files
+> to the storage area, delete the marker (or wipe the storage volume) to
+> force a re-index. See [docs/06_dcmqridx_behavior.md](docs/06_dcmqridx_behavior.md)
+> for details on the underlying `dcmqridx` semantics.
+
 ## Configuration
 
 ### Environment Variables
