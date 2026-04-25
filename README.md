@@ -202,7 +202,7 @@ Any DICOM-capable application can connect to the PACS via the host-mapped ports:
 | Host | `<docker-host-ip>` or `localhost` |
 | Port | `11112` (primary), `11113` (secondary) |
 | Called AE Title | `DCMTK_PACS` or `DCMTK_PAC2` |
-| Calling AE Title | Any (Peers = ANY) |
+| Calling AE Title | Any (Peers = ANY in test config — see [Security Notes](#security-notes)) |
 
 For C-MOVE **from** the PACS **to** an external application, the application must be
 registered in the dcmqrscp HostTable. Edit `config/dcmqrscp-primary.cfg.template`
@@ -296,6 +296,66 @@ Key sections:
 - **HostTable**: Defines known peers for C-MOVE destination routing
 - **AETable**: Defines storage areas, access mode, and capacity limits
 - **Global**: Network port, PDU size, max associations
+
+## Security Notes
+
+**The default configuration shipped in this repository is intended for
+isolated test environments only and is NOT safe for production use.**
+
+### Default behavior: `ANY` Peers
+
+Both `config/dcmqrscp-primary.cfg.template` and
+`config/dcmqrscp-secondary.cfg.template` set the AETable Peers field to
+`ANY`:
+
+```
+AETable BEGIN
+  ${AE_TITLE}  ${STORAGE_DIR}/${AE_TITLE}  RW  (...)  ANY
+AETable END
+```
+
+`ANY` instructs `dcmqrscp` to accept associations from **any** DICOM SCU
+on the network without verifying the Calling AE Title. This is convenient
+for local integration testing but exposes the PACS to:
+
+- Unauthenticated C-STORE from arbitrary peers (data poisoning, malware
+  delivery via DICOM payloads).
+- Unauthenticated C-FIND / C-MOVE that may exfiltrate PHI (Protected
+  Health Information).
+- Compliance violations under HIPAA, GDPR, and the Korean Personal
+  Information Protection Act, all of which require restricting access to
+  known callers.
+
+### Production-safe alternative
+
+For any deployment that touches a non-isolated network, replace `ANY`
+with a `HostTable` + `all_peers` whitelist that names exactly which AE
+Titles are allowed to connect. A complete, annotated example is provided
+at:
+
+```
+config/dcmqrscp-production.cfg.example
+```
+
+That file:
+
+1. Lists each modality / viewer / archive explicitly in `HostTable`.
+2. Aggregates them under a symbolic name (`all_peers`).
+3. References that name in the `AETable` Peers field instead of `ANY`.
+
+### Additional hardening
+
+Even with a peer whitelist, a production deployment should add:
+
+- **Network isolation**: Run `dcmqrscp` behind a firewall or on a private
+  VLAN. DICOM is not encrypted by default.
+- **TLS**: Use `dcmqrscp --enable-tls` (or a TLS-terminating proxy) to
+  protect data in transit.
+- **Audit logging**: Set `LOG_LEVEL=info` (or `debug` during incident
+  triage) and forward `dcmqrscp` logs to a central log store. Alert on
+  rejected associations.
+- **Access reviews**: Periodically audit the HostTable; remove
+  decommissioned peers and rotate AE Titles when needed.
 
 ## Project Structure
 
