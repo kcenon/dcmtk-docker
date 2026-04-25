@@ -36,7 +36,7 @@ services:
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD", "echoscu", "localhost", "11112"]
+      test: ["CMD-SHELL", "echoscu -aec ${AE_TITLE} localhost 11112"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -72,7 +72,7 @@ services:
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD", "echoscu", "localhost", "11112"]
+      test: ["CMD-SHELL", "echoscu -aec ${AE_TITLE} localhost 11112"]
       interval: 10s
       timeout: 5s
       retries: 3
