@@ -398,7 +398,9 @@ dcmtk_docker/
 ### "Association rejected" / "Connection refused"
 
 1. **Check the service is running**: `./pacs.sh status` — all services should show "healthy"
-2. **Check the AE Title**: DICOM AE Titles are case-sensitive. Use exactly `DCMTK_PACS`, not `dcmtk_pacs`
+2. **Check the AE Title**: DICOM AE Titles are case-sensitive. Use exactly `DCMTK_PACS`, not `dcmtk_pacs`.
+   The PACS healthcheck issues `echoscu -aec ${AE_TITLE}` against itself, so a container will be marked
+   `unhealthy` if the configured `AE_TITLE` does not match what `dcmqrscp` actually loaded.
 3. **Check the port**: All containers listen on internal port `11112`. Host ports differ (11112, 11113, 11114)
 4. **Check the network**: Services must be on the same Docker network (`dicom-net`)
 
