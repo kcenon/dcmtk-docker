@@ -1,4 +1,21 @@
 #
+# ============================================================================
+# WARNING: TEST ENVIRONMENT ONLY - DO NOT USE IN PRODUCTION
+# ============================================================================
+# This template uses "ANY" as the Peers entry in the AETable below, which
+# allows any DICOM SCU on the network to connect, store, query, and retrieve
+# without Calling AE Title verification.
+#
+# This is acceptable for an isolated, ephemeral test environment but is
+# UNSAFE for any production-adjacent deployment. Unauthenticated DICOM
+# access can violate HIPAA, GDPR, the Korean Personal Information
+# Protection Act, and similar healthcare/privacy regulations.
+#
+# For a production-safe configuration that restricts Peers to a known
+# whitelist via HostTable + all_peers, see:
+#   config/dcmqrscp-production.cfg.example
+# ============================================================================
+#
 # dcmqrscp configuration - Primary PACS Server
 # Processed by envsubst at container startup
 #
