@@ -70,14 +70,33 @@ start_pacs_server() {
     # Generate test data if enabled
     maybe_generate_test_data
 
-    # If test data was generated, register it with the PACS database
+    # If test data was generated, register it with the PACS database.
+    #
+    # Indexing is gated by a marker file at "${STORAGE_DIR}/${AE_TITLE}/.indexed"
+    # to avoid redundant work on every container restart. Source review of
+    # DCMTK shows that re-indexing the same SOP Instance UIDs does not grow
+    # index.dat unboundedly (duplicate records are detected and tombstone
+    # slots are reused). The marker is therefore a defensive optimization,
+    # not a correctness fix. To force re-indexing (e.g. after adding new
+    # test DICOM files), delete the marker file or wipe the storage volume.
+    # See docs/06_dcmqridx_behavior.md for the source-level analysis.
     if [ "${GENERATE_TEST_DATA}" = "true" ] && [ -d "${TEST_DATA_DIR}" ]; then
-        local dcm_count
-        dcm_count=$(find "${TEST_DATA_DIR}" -name "*.dcm" 2>/dev/null | wc -l)
-        if [ "$dcm_count" -gt 0 ]; then
-            log_info "Registering ${dcm_count} test DICOM files with PACS database..."
-            find "${TEST_DATA_DIR}" -name "*.dcm" -exec \
-                dcmqridx "${STORAGE_DIR}/${AE_TITLE}" {} + 2>/dev/null || true
+        local marker="${STORAGE_DIR}/${AE_TITLE}/.indexed"
+        if [ -f "$marker" ]; then
+            log_info "Skipping dcmqridx; marker present at ${marker} (delete to force re-index)"
+        else
+            local dcm_count
+            dcm_count=$(find "${TEST_DATA_DIR}" -name "*.dcm" 2>/dev/null | wc -l)
+            if [ "$dcm_count" -gt 0 ]; then
+                log_info "Registering ${dcm_count} test DICOM files with PACS database..."
+                if find "${TEST_DATA_DIR}" -name "*.dcm" -exec \
+                        dcmqridx "${STORAGE_DIR}/${AE_TITLE}" {} + 2>/dev/null; then
+                    touch "$marker"
+                    log_info "Indexing complete; marker created at ${marker}"
+                else
+                    log_warn "dcmqridx returned non-zero; marker not created (will retry next start)"
+                fi
+            fi
         fi
     fi
 
