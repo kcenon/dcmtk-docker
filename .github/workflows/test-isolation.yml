@@ -1,0 +1,126 @@
+name: Test Isolation
+
+# Verify each test script can run independently in a fresh container
+# (issue #4). Every matrix job spins up the docker-compose stack from
+# scratch, executes a single test script via test-client, and tears the
+# stack down with volumes wiped. Any cross-script ordering dependency
+# would surface here as a failed job.
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'tests/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - 'scripts/**'
+      - 'config/**'
+      - '.github/workflows/test-isolation.yml'
+  push:
+    branches: [develop, main]
+    paths:
+      - 'tests/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - 'scripts/**'
+      - 'config/**'
+      - '.github/workflows/test-isolation.yml'
+
+jobs:
+  test-isolation:
+    name: ${{ matrix.test }} (isolated)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - test-echo.sh
+          - test-store.sh
+          - test-find.sh
+          - test-move.sh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          # Give services a moment to settle past their start_period
+          sleep 5
+
+      - name: Wait for primary PACS to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server is healthy"
+              exit 0
+            fi
+            echo "waiting for pacs-server (attempt $i/60, status=$status)"
+            sleep 2
+          done
+          echo "ERROR: pacs-server did not become healthy in time"
+          docker compose logs pacs-server
+          exit 1
+
+      - name: Run ${{ matrix.test }} in isolation
+        run: |
+          docker compose exec -T test-client /tests/${{ matrix.test }}
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "=== pacs-server logs ==="
+          docker compose logs pacs-server || true
+          echo "=== pacs-server-2 logs ==="
+          docker compose logs pacs-server-2 || true
+          echo "=== storescp-receiver logs ==="
+          docker compose logs storescp-receiver || true
+          echo "=== test-client logs ==="
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  test-store-idempotency:
+    name: test-store.sh twice (idempotency)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Wait for primary PACS to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: pacs-server did not become healthy in time"
+          docker compose logs pacs-server
+          exit 1
+
+      - name: First test-store.sh run
+        run: docker compose exec -T test-client /tests/test-store.sh
+
+      - name: Second test-store.sh run (must also pass)
+        run: docker compose exec -T test-client /tests/test-store.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs pacs-server || true
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
