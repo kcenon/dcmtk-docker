@@ -46,6 +46,12 @@ run_find_test() {
     fi
 }
 
+# ── Preamble: verify required SCPs are reachable ──────
+# Make the precondition explicit so this script can be invoked in any
+# order. ensure_pacs_data() is called below, but the C-ECHO check fails
+# fast with an actionable message when the PACS is simply not running.
+ensure_scp_reachable "primary PACS" "${PACS_HOST}" "${PACS_PORT}" "${PACS_AE}" "${MY_AE}" || exit 1
+
 # ── Ensure PACS has data ──────────────────────────────
 ensure_pacs_data "${PACS_HOST}" "${PACS_PORT}" "${PACS_AE}" "${MY_AE}" "${TEST_DATA_DIR}"
 
