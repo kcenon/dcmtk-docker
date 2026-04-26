@@ -16,6 +16,13 @@ PACS2_AE="${PACS2_AE_TITLE:-DCMTK_PAC2}"
 MY_AE="${AE_TITLE:-TEST_SCU}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
 
+# ── Preamble: verify required SCPs are reachable ──────
+# Fail fast with a clear message if the environment is not ready, so the
+# script can be invoked standalone (in any order) instead of assuming a
+# previous test has already validated connectivity.
+ensure_scp_reachable "primary PACS"   "${PACS_HOST}"  "${PACS_PORT}" "${PACS_AE}"  "${MY_AE}" || exit 1
+ensure_scp_reachable "secondary PACS" "${PACS2_HOST}" "${PACS_PORT}" "${PACS2_AE}" "${MY_AE}" || exit 1
+
 # ── Ensure test data exists ───────────────────────────
 if [ ! -d "${TEST_DATA_DIR}/ct" ] || [ "$(find "${TEST_DATA_DIR}" -name '*.dcm' 2>/dev/null | wc -l)" -eq 0 ]; then
     if [ -x /usr/local/bin/generate-test-data.sh ]; then
@@ -26,6 +33,14 @@ if [ ! -d "${TEST_DATA_DIR}/ct" ] || [ "$(find "${TEST_DATA_DIR}" -name '*.dcm' 
         exit 1
     fi
 fi
+
+# ── Wipe PACS so re-runs start from a known-empty state ──
+# Without this the C-STORE verification step would only check that the
+# study count is >= 3, which is trivially true after the first run; with
+# this, calling test-store.sh twice in a row both pass and exercise the
+# full storescu -> dcmqrscp ingest path each time.
+ensure_clean_pacs "${PACS_HOST}"  "${PACS_PORT}" "${PACS_AE}"  "${MY_AE}"
+ensure_clean_pacs "${PACS2_HOST}" "${PACS_PORT}" "${PACS2_AE}" "${MY_AE}"
 
 CT_COUNT=$(find "${TEST_DATA_DIR}/ct" -name "*.dcm" 2>/dev/null | wc -l)
 MR_COUNT=$(find "${TEST_DATA_DIR}/mr" -name "*.dcm" 2>/dev/null | wc -l)
