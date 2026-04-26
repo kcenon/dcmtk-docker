@@ -142,7 +142,9 @@ NEG_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
 # Verbose findscu echoes the empty request key as
 # "(0020,000d) UI (no value available) ... StudyInstanceUID"
 # which would otherwise inflate the count even when zero studies match.
-NEG_COUNT=$(echo "${NEG_OUTPUT}" | grep "StudyInstanceUID" | grep -vc "no value available" 2>/dev/null || echo "0")
+# Use "|| true" instead of "|| echo 0" so a zero match (grep -vc exit 1)
+# does not append a second "0" to the captured value and break -eq.
+NEG_COUNT=$(echo "${NEG_OUTPUT}" | grep "StudyInstanceUID" | grep -vc "no value available" || true)
 if [ "${NEG_COUNT}" -eq 0 ]; then
     print_pass "C-FIND: nonexistent patient returns 0 results"
     TEST_PASSED=$((TEST_PASSED + 1))
