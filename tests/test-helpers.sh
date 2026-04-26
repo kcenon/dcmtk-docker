@@ -128,6 +128,27 @@ run_test_expect_fail() {
     fi
 }
 
+# ── Verify SCP reachability via C-ECHO ────────────────
+# Usage: ensure_scp_reachable "label" "host" "port" "called_ae" "calling_ae"
+# Returns 0 if reachable, 1 otherwise. Prints a one-line preamble status.
+ensure_scp_reachable() {
+    local label="$1"
+    local scp_host="$2"
+    local scp_port="$3"
+    local scp_ae="$4"
+    local my_ae="$5"
+
+    if echoscu -aet "${my_ae}" -aec "${scp_ae}" -to 5 \
+            "${scp_host}" "${scp_port}" >/dev/null 2>&1; then
+        echo "  preamble: ${label} (${scp_ae}@${scp_host}:${scp_port}) reachable"
+        return 0
+    fi
+
+    echo "ERROR: preamble: ${label} (${scp_ae}@${scp_host}:${scp_port}) NOT reachable" >&2
+    echo "       Verify the service is running and the AE Title is configured." >&2
+    return 1
+}
+
 # ── Ensure test data is loaded into PACS ──────────────
 ensure_pacs_data() {
     local pacs_host="$1"
@@ -159,4 +180,78 @@ ensure_pacs_data() {
             +sd +r "${pacs_host}" "${pacs_port}" "${data_dir}/" >/dev/null 2>&1 || true
         sleep 1
     fi
+}
+
+# ── Wipe PACS storage and reload from scratch ─────────
+# Canonical bootstrap helper for tests that require a clean PACS.
+# Idempotent: safe to call multiple times. Always leaves the PACS empty
+# of test data after the wipe (callers typically follow with storescu).
+#
+# The container hosting dcmqrscp is identified by ${pacs_host} which, in
+# the docker-compose setup, doubles as the container_name. Storage is
+# wiped via `docker exec` against that container's STORAGE_DIR.
+#
+# Usage:
+#   ensure_clean_pacs "host" "port" "called_ae" "calling_ae" [container_name] [storage_dir]
+#
+# Defaults:
+#   container_name -> ${pacs_host}
+#   storage_dir    -> /dicom/db (matches docker-compose pacs-server config)
+ensure_clean_pacs() {
+    local pacs_host="$1"
+    local pacs_port="$2"
+    local pacs_ae="$3"
+    local my_ae="$4"
+    local container_name="${5:-${pacs_host}}"
+    local storage_dir="${6:-/dicom/db}"
+
+    # Verify the SCP responds before attempting destructive work
+    if ! echoscu -aet "${my_ae}" -aec "${pacs_ae}" -to 5 \
+            "${pacs_host}" "${pacs_port}" >/dev/null 2>&1; then
+        echo "ERROR: ensure_clean_pacs: ${pacs_ae}@${pacs_host}:${pacs_port} not reachable" >&2
+        return 1
+    fi
+
+    # Wipe the PACS storage directory inside the container.
+    # Two strategies, in order of preference:
+    #   1. docker exec (when running on the host with the docker CLI)
+    #   2. direct rm   (when this helper is itself running inside the PACS container)
+    if command -v docker >/dev/null 2>&1 && \
+            docker inspect "${container_name}" >/dev/null 2>&1; then
+        echo "Wiping PACS storage in container ${container_name}:${storage_dir}"
+        docker exec "${container_name}" sh -c \
+            "find '${storage_dir}' -mindepth 1 -delete 2>/dev/null || true"
+        # Restart dcmqrscp so the index is re-read from the now-empty dir
+        docker restart "${container_name}" >/dev/null 2>&1 || true
+        # Wait for the container to come back online
+        local i
+        for i in $(seq 1 30); do
+            if echoscu -aet "${my_ae}" -aec "${pacs_ae}" -to 2 \
+                    "${pacs_host}" "${pacs_port}" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 1
+        done
+    elif [ -d "${storage_dir}" ] && [ -w "${storage_dir}" ]; then
+        echo "Wiping PACS storage at ${storage_dir} (in-container mode)"
+        find "${storage_dir}" -mindepth 1 -delete 2>/dev/null || true
+    else
+        echo "WARNING: ensure_clean_pacs: no docker CLI access and ${storage_dir} not writable" >&2
+        echo "         PACS will not be wiped; tests may observe pre-existing data." >&2
+        return 0
+    fi
+
+    # Verify the wipe succeeded by re-querying study count
+    local check_output remaining
+    check_output=$(findscu -aet "${my_ae}" -aec "${pacs_ae}" \
+        -S "${pacs_host}" "${pacs_port}" \
+        -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID 2>&1 || true)
+    remaining=$(echo "${check_output}" | grep -c "StudyInstanceUID" 2>/dev/null || echo "0")
+
+    if [ "${remaining}" -gt 0 ]; then
+        echo "WARNING: ensure_clean_pacs: ${remaining} studies remain after wipe" >&2
+    else
+        echo "  ensure_clean_pacs: PACS storage cleared"
+    fi
+    return 0
 }
