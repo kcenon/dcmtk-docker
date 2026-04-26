@@ -113,10 +113,11 @@ run_suite() {
     fi
 }
 
-run_suite "C-ECHO"  "${SCRIPT_DIR}/test-echo.sh"
-run_suite "C-STORE" "${SCRIPT_DIR}/test-store.sh"
-run_suite "C-FIND"  "${SCRIPT_DIR}/test-find.sh"
-run_suite "C-MOVE"  "${SCRIPT_DIR}/test-move.sh"
+run_suite "C-ECHO"    "${SCRIPT_DIR}/test-echo.sh"
+run_suite "C-STORE"   "${SCRIPT_DIR}/test-store.sh"
+run_suite "C-FIND"    "${SCRIPT_DIR}/test-find.sh"
+run_suite "C-MOVE"    "${SCRIPT_DIR}/test-move.sh"
+run_suite "PixelData" "${SCRIPT_DIR}/test-pixeldata.sh"
 
 # ── Final Summary ─────────────────────────────────────
 echo ""

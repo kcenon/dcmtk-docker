@@ -15,6 +15,9 @@ services:
       - MAX_BYTES_PER_STUDY=${MAX_BYTES_PER_STUDY:-1024mb}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - GENERATE_TEST_DATA=${GENERATE_TEST_DATA:-true}
+      - GENERATE_PIXEL_DATA=${GENERATE_PIXEL_DATA:-false}
+      - PIXEL_DATA_ROWS=${PIXEL_DATA_ROWS:-64}
+      - PIXEL_DATA_COLS=${PIXEL_DATA_COLS:-64}
       - TEST_DATA_DIR=/dicom/testdata
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
       # Peer configuration for HostTable
@@ -114,6 +117,9 @@ services:
       - STORESCP_HOST=storescp-receiver
       - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
       - GENERATE_TEST_DATA=${GENERATE_TEST_DATA:-true}
+      - GENERATE_PIXEL_DATA=${GENERATE_PIXEL_DATA:-false}
+      - PIXEL_DATA_ROWS=${PIXEL_DATA_ROWS:-64}
+      - PIXEL_DATA_COLS=${PIXEL_DATA_COLS:-64}
       - TEST_DATA_DIR=/dicom/testdata
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
     volumes:
