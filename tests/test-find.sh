@@ -46,6 +46,12 @@ run_find_test() {
     fi
 }
 
+# ── Preamble: verify required SCPs are reachable ──────
+# Make the precondition explicit so this script can be invoked in any
+# order. ensure_pacs_data() is called below, but the C-ECHO check fails
+# fast with an actionable message when the PACS is simply not running.
+ensure_scp_reachable "primary PACS" "${PACS_HOST}" "${PACS_PORT}" "${PACS_AE}" "${MY_AE}" || exit 1
+
 # ── Ensure PACS has data ──────────────────────────────
 ensure_pacs_data "${PACS_HOST}" "${PACS_PORT}" "${PACS_AE}" "${MY_AE}" "${TEST_DATA_DIR}"
 
@@ -133,7 +139,12 @@ NEG_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
     -k QueryRetrieveLevel=STUDY \
     -k PatientID="NONEXISTENT" \
     -k StudyInstanceUID 2>&1 || true)
-NEG_COUNT=$(echo "${NEG_OUTPUT}" | grep -c "StudyInstanceUID" 2>/dev/null || echo "0")
+# Verbose findscu echoes the empty request key as
+# "(0020,000d) UI (no value available) ... StudyInstanceUID"
+# which would otherwise inflate the count even when zero studies match.
+# Use "|| true" instead of "|| echo 0" so a zero match (grep -vc exit 1)
+# does not append a second "0" to the captured value and break -eq.
+NEG_COUNT=$(echo "${NEG_OUTPUT}" | grep "StudyInstanceUID" | grep -vc "no value available" || true)
 if [ "${NEG_COUNT}" -eq 0 ]; then
     print_pass "C-FIND: nonexistent patient returns 0 results"
     TEST_PASSED=$((TEST_PASSED + 1))

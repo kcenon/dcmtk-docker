@@ -28,19 +28,19 @@ MaxAssociations = ${MAX_ASSOCIATIONS}
 # HostTable: defines known DICOM peers for C-MOVE destinations
 # Format: symbolic_name = (AETitle, hostname, port)
 HostTable BEGIN
-  test_client  = (${TEST_SCU_AE_TITLE},  test-client,       11112)
-  store_scp    = (${STORESCP_AE_TITLE},   storescp-receiver, 11112)
-  pacs1        = (${PACS1_AE_TITLE},      pacs-server,       11112)
-  all_peers    = test_client, store_scp, pacs1
+test_client = (${TEST_SCU_AE_TITLE}, test-client, 11112)
+store_scp = (${STORESCP_AE_TITLE}, storescp-receiver, 11112)
+pacs1 = (${PACS1_AE_TITLE}, pacs-server, 11112)
+all_peers = test_client, store_scp, pacs1
 HostTable END
 
 # VendorTable: group peers by vendor/purpose
 VendorTable BEGIN
-  "Test Peers" = all_peers
+"Test Peers" = all_peers
 VendorTable END
 
 # AETable: defines storage areas for this SCP
 # Format: AETitle StorageDirectory AccessMode (MaxStudies, MaxBytesPerStudy) Peers
 AETable BEGIN
-  ${AE_TITLE}  ${STORAGE_DIR}/${AE_TITLE}  RW  (${MAX_STUDIES}, ${MAX_BYTES_PER_STUDY})  ANY
+${AE_TITLE} ${STORAGE_DIR}/${AE_TITLE} RW (${MAX_STUDIES}, ${MAX_BYTES_PER_STUDY}) ANY
 AETable END

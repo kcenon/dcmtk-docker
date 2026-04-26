@@ -22,6 +22,13 @@ STORESCP_AE="${STORESCP_AE_TITLE:-STORE_SCP}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
 OID_ROOT="${OID_ROOT:-1.2.826.0.1.3680043.8.1055}"
 
+# ── Preamble: verify required SCPs are reachable ──────
+# Both the source PACS and the storescp-receiver destination must be up
+# before any C-MOVE work. Fail fast with a clear message if either is
+# missing, so this script can be invoked standalone in any order.
+ensure_scp_reachable "source PACS"        "${PACS_HOST}"     "${PACS_PORT}" "${PACS_AE}"     "${MY_AE}" || exit 1
+ensure_scp_reachable "storescp-receiver"  "${STORESCP_HOST}" "${PACS_PORT}" "${STORESCP_AE}" "${MY_AE}" || exit 1
+
 # ── Ensure PACS has data ──────────────────────────────
 ensure_pacs_data "${PACS_HOST}" "${PACS_PORT}" "${PACS_AE}" "${MY_AE}" "${TEST_DATA_DIR}"
 
