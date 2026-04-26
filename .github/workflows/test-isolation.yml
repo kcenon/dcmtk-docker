@@ -42,6 +42,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Stage .env from defaults
+        run: cp env.default .env
+
       - name: Build and start stack
         run: |
           docker compose up -d --build
@@ -89,6 +92,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Stage .env from defaults
+        run: cp env.default .env
 
       - name: Build and start stack
         run: |
