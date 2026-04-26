@@ -86,6 +86,57 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  test-pixeldata:
+    name: test-pixeldata.sh with GENERATE_PIXEL_DATA=true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults with PixelData enabled
+        run: |
+          cp env.default .env
+          # Flip the opt-in switch and verify it took
+          sed -i 's/^GENERATE_PIXEL_DATA=.*/GENERATE_PIXEL_DATA=true/' .env
+          grep '^GENERATE_PIXEL_DATA=true' .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Wait for primary PACS to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: pacs-server did not become healthy in time"
+          docker compose logs pacs-server
+          exit 1
+
+      - name: Run test-pixeldata.sh
+        run: docker compose exec -T -e GENERATE_PIXEL_DATA=true test-client /tests/test-pixeldata.sh
+
+      - name: Verify findscu/movescu still recognize the files
+        run: |
+          docker compose exec -T test-client /tests/test-find.sh
+          docker compose exec -T test-client /tests/test-move.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs pacs-server || true
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
   test-store-idempotency:
     name: test-store.sh twice (idempotency)
     runs-on: ubuntu-latest

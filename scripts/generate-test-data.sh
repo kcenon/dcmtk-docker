@@ -9,6 +9,9 @@ set -e
 
 OUTPUT_DIR="${1:-${TEST_DATA_DIR:-/dicom/testdata}}"
 OID_ROOT="${OID_ROOT:-1.2.826.0.1.3680043.8.499}"
+GENERATE_PIXEL_DATA="${GENERATE_PIXEL_DATA:-false}"
+PIXEL_DATA_ROWS="${PIXEL_DATA_ROWS:-64}"
+PIXEL_DATA_COLS="${PIXEL_DATA_COLS:-64}"
 
 # Skip if test data already exists
 if [ -d "${OUTPUT_DIR}" ] && [ "$(find "${OUTPUT_DIR}" -name '*.dcm' 2>/dev/null | wc -l)" -gt 0 ]; then
@@ -21,9 +24,47 @@ mkdir -p "${OUTPUT_DIR}/ct" "${OUTPUT_DIR}/mr" "${OUTPUT_DIR}/cr"
 echo "[generate-test-data] Generating synthetic DICOM files..."
 echo "[generate-test-data] OID root: ${OID_ROOT}"
 echo "[generate-test-data] Output: ${OUTPUT_DIR}"
+if [ "${GENERATE_PIXEL_DATA}" = "true" ]; then
+    echo "[generate-test-data] PixelData: ${PIXEL_DATA_ROWS}x${PIXEL_DATA_COLS} 16-bit MONOCHROME2 (deterministic gradient)"
+else
+    echo "[generate-test-data] PixelData: disabled (set GENERATE_PIXEL_DATA=true to enable)"
+fi
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "${TMPDIR}"' EXIT
+
+# ── Helper: write a deterministic 16-bit MONOCHROME2 pixel buffer ─────
+# A horizontal gradient (constant per column, smooth 0..65535 across cols)
+# is generated once per (rows, cols) and cached in TMPDIR for reuse.
+# Output: little-endian uint16 raw bytes, total = rows * cols * 2.
+# Args: rows cols outfile
+generate_pixel_data_file() {
+    local rows="$1"
+    local cols="$2"
+    local outfile="$3"
+
+    local row_seq=""
+    local x val lo hi
+    for ((x = 0; x < cols; x++)); do
+        if [ "${cols}" -gt 1 ]; then
+            val=$(( x * 65535 / (cols - 1) ))
+        else
+            val=0
+        fi
+        lo=$(( val & 0xFF ))
+        hi=$(( (val >> 8) & 0xFF ))
+        row_seq+=$(printf '\\x%02x\\x%02x' "${lo}" "${hi}")
+    done
+
+    local full_seq=""
+    local y
+    for ((y = 0; y < rows; y++)); do
+        full_seq+="${row_seq}"
+    done
+
+    # Single binary write via printf %b (no xxd / perl dependency required)
+    printf '%b' "${full_seq}" > "${outfile}"
+}
 
 # ── Helper: create a DICOM file from attributes ─────
 # Args: output_file sop_class_uid sop_instance_uid patient_name patient_id
@@ -84,6 +125,29 @@ create_dicom() {
 (0008,0016) UI =${sop_class_uid}
 (0008,0018) UI [${sop_instance_uid}]
 DUMP
+
+    if [ "${GENERATE_PIXEL_DATA}" = "true" ]; then
+        # Cache the pixel buffer per (rows, cols) — identical bytes for every
+        # instance keeps generation deterministic and avoids repeated work.
+        local pixel_file="${TMPDIR}/pixels_${PIXEL_DATA_ROWS}x${PIXEL_DATA_COLS}.bin"
+        if [ ! -s "${pixel_file}" ]; then
+            generate_pixel_data_file "${PIXEL_DATA_ROWS}" "${PIXEL_DATA_COLS}" "${pixel_file}"
+        fi
+
+        cat >> "${dump_file}" << PIXDUMP
+
+# Image Pixel Module
+(0028,0002) US 1
+(0028,0004) CS [MONOCHROME2]
+(0028,0010) US ${PIXEL_DATA_ROWS}
+(0028,0011) US ${PIXEL_DATA_COLS}
+(0028,0100) US 16
+(0028,0101) US 16
+(0028,0102) US 15
+(0028,0103) US 0
+(7FE0,0010) OW =${pixel_file}
+PIXDUMP
+    fi
 
     dump2dcm "${dump_file}" "${output_file}" 2>/dev/null
 }

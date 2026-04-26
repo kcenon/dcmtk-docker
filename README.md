@@ -255,6 +255,34 @@ rm -rf data/ct data/mr data/cr
 docker compose restart test-client
 ```
 
+#### Synthetic PixelData (optional)
+
+By default, generated files carry only metadata (Patient/Study/Series/Image/SOP modules)
+— enough to exercise the DICOM **network layer** (C-STORE, C-FIND, C-MOVE) but not
+the **image pipeline** (decode, window/level, render). To make the synthetic files
+usable by viewers and rendering pipelines, set `GENERATE_PIXEL_DATA=true`:
+
+```bash
+# Wipe existing test data and re-generate with PixelData embedded
+rm -rf data/ct data/mr data/cr
+GENERATE_PIXEL_DATA=true docker compose up -d --force-recreate pacs-server
+```
+
+When enabled, every CT/MR/CR instance gains an Image Pixel Module
+(`Rows`, `Columns`, `BitsAllocated`, `BitsStored`, `HighBit`, `PixelRepresentation`,
+`SamplesPerPixel`, `PhotometricInterpretation`) and a `(7FE0,0010) OW` element
+containing a deterministic 64×64 16-bit horizontal gradient. Override the
+dimensions with `PIXEL_DATA_ROWS` / `PIXEL_DATA_COLS`.
+
+Verify with `dcmdump`:
+
+```bash
+docker compose exec test-client dcmdump /dicom/testdata/ct/ct_pat001_1.dcm | grep -E 'PixelData|Rows|Columns'
+```
+
+A smoke test that runs `dcm2pnm` against a generated file is included as
+`tests/test-pixeldata.sh` (auto-skipped when `GENERATE_PIXEL_DATA` is unset).
+
 > **Note:** The `pacs-server` indexes test DICOM files into its database on
 > first startup and writes a marker file at `<storage>/<AE_TITLE>/.indexed`
 > to skip re-indexing on subsequent restarts. After adding new DICOM files
@@ -289,6 +317,9 @@ cp env.default .env
 | `MAX_BYTES_PER_STUDY` | `1024mb` | Maximum bytes per study |
 | `LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
 | `GENERATE_TEST_DATA` | `true` | Generate synthetic data on startup |
+| `GENERATE_PIXEL_DATA` | `false` | Embed deterministic 16-bit MONOCHROME2 PixelData in generated files |
+| `PIXEL_DATA_ROWS` | `64` | Synthetic image rows when `GENERATE_PIXEL_DATA=true` |
+| `PIXEL_DATA_COLS` | `64` | Synthetic image columns when `GENERATE_PIXEL_DATA=true` |
 | `OID_ROOT` | `1.2.826.0.1.3680043.8.499` | OID root for test UIDs |
 
 ### dcmqrscp Configuration
