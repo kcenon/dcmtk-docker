@@ -273,14 +273,57 @@ assert_pixel_range() {
     return 1
 }
 
+# ── Helper: assert CT-specific Rescale tags (PS3.3 C.8.2.1) ─
+# CT IOD requires RescaleIntercept (Type 1), RescaleSlope (Type 1) and
+# RescaleType (Type 1C). MR and CR do not carry these tags, so this
+# helper is invoked only from the CT branch of the test loop.
+# Args: LABEL FILE EXP_INTERCEPT EXP_SLOPE EXP_TYPE
+assert_ct_rescale() {
+    local label="$1"
+    local file="$2"
+    local exp_intercept="$3"
+    local exp_slope="$4"
+    local exp_type="$5"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local dump
+    dump=$(dcmdump "${file}" 2>/dev/null) || {
+        print_fail "PixelData: ${label} dcmdump failed (${file})"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    }
+
+    local got_intercept got_slope got_type
+    got_intercept=$(grep -m1 '(0028,1052) DS' <<<"${dump}" | sed -nE 's/.*\[([^]]*)\].*/\1/p' | sed 's/[[:space:]]*$//')
+    got_slope=$(grep    -m1 '(0028,1053) DS' <<<"${dump}" | sed -nE 's/.*\[([^]]*)\].*/\1/p' | sed 's/[[:space:]]*$//')
+    got_type=$(grep     -m1 '(0028,1054) LO' <<<"${dump}" | sed -nE 's/.*\[([^]]*)\].*/\1/p' | sed 's/[[:space:]]*$//')
+
+    local errors=()
+    [ "${got_intercept}" = "${exp_intercept}" ] || errors+=("RescaleIntercept expected=${exp_intercept} got=${got_intercept:-<empty>}")
+    [ "${got_slope}"     = "${exp_slope}" ]     || errors+=("RescaleSlope expected=${exp_slope} got=${got_slope:-<empty>}")
+    [ "${got_type}"      = "${exp_type}" ]      || errors+=("RescaleType expected=${exp_type} got=${got_type:-<empty>}")
+
+    if [ "${#errors[@]}" -eq 0 ]; then
+        print_pass "PixelData: ${label} CT rescale tags match (intercept=${got_intercept} slope=${got_slope} type=${got_type})"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "PixelData: ${label} CT rescale mismatch: $(IFS=' | '; echo "${errors[*]}")"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
 # ── Per-modality expected-value table ─────────────────
 # Single source of truth for attribute values. Subsequent issues update
 # rows here without modifying the assertion functions:
-#   #12 (CT signed/Rescale)  -> CT row pix_rep flips 0 -> 1
+#   #12 (CT signed/Rescale)  -> CT pix_rep is now 1; CT-only Rescale tags
+#                                are asserted via assert_ct_rescale below.
 #   #13 (modality-realistic) -> all rows get distinct rows/cols/bits_stored
 # Format: rows cols bits_stored pix_rep photometric
 declare -A PIXEL_EXPECTED=(
-    [ct]="64 64 16 0 MONOCHROME2"
+    [ct]="64 64 16 1 MONOCHROME2"
     [mr]="64 64 16 0 MONOCHROME2"
     [cr]="64 64 16 0 MONOCHROME2"
 )
@@ -308,6 +351,11 @@ for modality in ct mr cr; do
             "${exp_rows}" "${exp_cols}" "${exp_bs}" "${exp_pr}" "${exp_pm}" || true
         assert_file_valid         "${label}" "${sample}" || true
         assert_dcm2pnm_dimensions "${label}" "${sample}" "${exp_rows}" "${exp_cols}" || true
+
+        # CT-only: verify the Rescale tags required by PS3.3 C.8.2.1.
+        if [ "${modality}" = "ct" ]; then
+            assert_ct_rescale "${label}" "${sample}" "-1024" "1.0" "HU" || true
+        fi
 
         # Opt-in slow-path range assertion. Range stays wide (full uint16) until
         # #13 narrows per-modality value ranges.

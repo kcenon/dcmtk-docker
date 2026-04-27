@@ -134,6 +134,18 @@ DUMP
             generate_pixel_data_file "${PIXEL_DATA_ROWS}" "${PIXEL_DATA_COLS}" "${pixel_file}"
         fi
 
+        # Per DICOM PS3.3 C.8.2.1, the CT Image Module requires
+        # PixelRepresentation=1 (signed two's complement) and RescaleIntercept/
+        # RescaleSlope (both Type 1) so stored values map to Hounsfield Units.
+        # MR and CR keep the unsigned representation and emit no Rescale tags,
+        # so their dump output stays byte-identical to the pre-fix baseline.
+        local pix_rep="0"
+        local rescale_tags=""
+        if [ "${modality}" = "CT" ]; then
+            pix_rep="1"
+            rescale_tags=$'\n(0028,1052) DS [-1024]\n(0028,1053) DS [1.0]\n(0028,1054) LO [HU]'
+        fi
+
         cat >> "${dump_file}" << PIXDUMP
 
 # Image Pixel Module
@@ -144,7 +156,7 @@ DUMP
 (0028,0100) US 16
 (0028,0101) US 16
 (0028,0102) US 15
-(0028,0103) US 0
+(0028,0103) US ${pix_rep}${rescale_tags}
 (7FE0,0010) OW =${pixel_file}
 PIXDUMP
     fi
