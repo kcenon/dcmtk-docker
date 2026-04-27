@@ -90,6 +90,201 @@ assert_dcm2pnm_renders() {
     return 1
 }
 
+# ── Helper: assert per-tag attribute values ───────────
+# Parses dcmdump once and checks Rows / Columns / BitsStored /
+# PixelRepresentation / PhotometricInterpretation against expected values.
+# Args: LABEL FILE EXP_ROWS EXP_COLS EXP_BITS_STORED EXP_PIX_REP EXP_PHOTOMETRIC
+assert_pixel_attributes() {
+    local label="$1"
+    local file="$2"
+    local exp_rows="$3"
+    local exp_cols="$4"
+    local exp_bits_stored="$5"
+    local exp_pix_rep="$6"
+    local exp_photometric="$7"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local dump
+    dump=$(dcmdump "${file}" 2>/dev/null) || {
+        print_fail "PixelData: ${label} dcmdump failed (${file})"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    }
+
+    local got_rows got_cols got_bs got_pr got_pm
+    got_rows=$(grep -m1 '(0028,0010) US' <<<"${dump}" | sed -nE 's/.*US[[:space:]]+([0-9]+).*/\1/p')
+    got_cols=$(grep -m1 '(0028,0011) US' <<<"${dump}" | sed -nE 's/.*US[[:space:]]+([0-9]+).*/\1/p')
+    got_bs=$(grep   -m1 '(0028,0101) US' <<<"${dump}" | sed -nE 's/.*US[[:space:]]+([0-9]+).*/\1/p')
+    got_pr=$(grep   -m1 '(0028,0103) US' <<<"${dump}" | sed -nE 's/.*US[[:space:]]+([0-9]+).*/\1/p')
+    got_pm=$(grep   -m1 '(0028,0004) CS' <<<"${dump}" | sed -nE 's/.*\[([^]]*)\].*/\1/p' | sed 's/[[:space:]]*$//')
+
+    local errors=()
+    [ "${got_rows}" = "${exp_rows}" ]        || errors+=("Rows expected=${exp_rows} got=${got_rows:-<empty>}")
+    [ "${got_cols}" = "${exp_cols}" ]        || errors+=("Columns expected=${exp_cols} got=${got_cols:-<empty>}")
+    [ "${got_bs}"   = "${exp_bits_stored}" ] || errors+=("BitsStored expected=${exp_bits_stored} got=${got_bs:-<empty>}")
+    [ "${got_pr}"   = "${exp_pix_rep}" ]     || errors+=("PixelRepresentation expected=${exp_pix_rep} got=${got_pr:-<empty>}")
+    [ "${got_pm}"   = "${exp_photometric}" ] || errors+=("PhotometricInterpretation expected=${exp_photometric} got=${got_pm:-<empty>}")
+
+    if [ "${#errors[@]}" -eq 0 ]; then
+        print_pass "PixelData: ${label} attributes match (rows=${got_rows} cols=${got_cols} bits=${got_bs} pr=${got_pr} pm=${got_pm})"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "PixelData: ${label} attribute mismatch: $(IFS=' | '; echo "${errors[*]}")"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
+# ── Helper: assert PS3.10 well-formedness via dcmftest ─
+# dcmftest prints "yes: <file>" and exits 0 for valid DICOM files.
+assert_file_valid() {
+    local label="$1"
+    local file="$2"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local out exit_code=0
+    out=$(dcmftest "${file}" 2>&1) || exit_code=$?
+    if [ "${exit_code}" -eq 0 ] && printf '%s\n' "${out}" | head -1 | grep -q '^yes:'; then
+        print_pass "PixelData: ${label} dcmftest valid"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "PixelData: ${label} dcmftest reports invalid (${file})"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
+# ── Helper: assert dcm2pnm output dimensions match ────
+# Renders to PGM and parses the dimensions header line ("WIDTH HEIGHT").
+# Comment lines starting with '#' inside the PNM header are skipped.
+assert_dcm2pnm_dimensions() {
+    local label="$1"
+    local file="$2"
+    local exp_rows="$3"
+    local exp_cols="$4"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local out_pnm
+    out_pnm=$(mktemp --suffix=.pnm)
+    # shellcheck disable=SC2064
+    trap "rm -f '${out_pnm}'" RETURN
+
+    if ! dcm2pnm "${file}" "${out_pnm}" >/dev/null 2>&1 || [ ! -s "${out_pnm}" ]; then
+        print_fail "PixelData: ${label} dcm2pnm produced no PNM (${file})"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    fi
+
+    local dims
+    dims=$(awk 'NR==1 {next}
+                /^[[:space:]]*#/ {next}
+                {print; exit}' "${out_pnm}")
+    local got_cols got_rows
+    got_cols=$(awk '{print $1}' <<<"${dims}")
+    got_rows=$(awk '{print $2}' <<<"${dims}")
+
+    if [ "${got_cols}" = "${exp_cols}" ] && [ "${got_rows}" = "${exp_rows}" ]; then
+        print_pass "PixelData: ${label} PNM dimensions ${got_cols}x${got_rows} match"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "PixelData: ${label} PNM dimensions expected ${exp_cols}x${exp_rows} got ${got_cols:-<empty>}x${got_rows:-<empty>}"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
+# ── Helper: assert .dcm instance count under a path ───
+assert_multi_instance_count() {
+    local label="$1"
+    local dir="$2"
+    local exp_count="$3"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local got_count
+    got_count=$(find "${dir}" -name '*.dcm' 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "${got_count}" = "${exp_count}" ]; then
+        print_pass "PixelData: ${label} found ${got_count} .dcm files"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "PixelData: ${label} expected ${exp_count} .dcm files got ${got_count} (${dir})"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
+# ── Helper: assert rendered pixel value range (opt-in) ─
+# Slow path (~500ms/file): renders to 16-bit PGM, scans the binary
+# section, and asserts every sample is within [MIN, MAX].
+# Gated by PIXEL_RANGE_CHECK=true so the default fast path is unaffected.
+assert_pixel_range() {
+    local label="$1"
+    local file="$2"
+    local min="$3"
+    local max="$4"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local out_pgm
+    out_pgm=$(mktemp --suffix=.pgm)
+    # shellcheck disable=SC2064
+    trap "rm -f '${out_pgm}'" RETURN
+
+    if ! dcm2pnm "${file}" "${out_pgm}" >/dev/null 2>&1 || [ ! -s "${out_pgm}" ]; then
+        print_fail "PixelData: ${label} pixel-range render failed (${file})"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    fi
+
+    # Locate end of PNM header: 3 newlines (P5, dims, maxval).
+    local header_bytes
+    header_bytes=$(awk 'BEGIN{n=0; b=0} {n++; b += length($0) + 1; if (n == 3) {print b; exit}}' "${out_pgm}")
+    if [ -z "${header_bytes}" ] || [ "${header_bytes}" -le 0 ]; then
+        print_fail "PixelData: ${label} could not parse PNM header for range scan"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    fi
+
+    # PGM with maxval > 255 stores 16-bit big-endian samples per spec.
+    local got_min got_max
+    read -r got_min got_max <<<"$(tail -c +$((header_bytes + 1)) "${out_pgm}" \
+        | od -An -tu2 --endian=big 2>/dev/null \
+        | awk 'BEGIN{mn=4294967295; mx=-1}
+               {for (i=1; i<=NF; i++) { v = $i + 0; if (v < mn) mn = v; if (v > mx) mx = v }}
+               END{ if (mx == -1) print ""; else print mn, mx }')"
+
+    if [ -n "${got_min:-}" ] && [ -n "${got_max:-}" ] \
+            && [ "${got_min}" -ge "${min}" ] && [ "${got_max}" -le "${max}" ]; then
+        print_pass "PixelData: ${label} display range [${got_min},${got_max}] within [${min},${max}]"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "PixelData: ${label} display range [${got_min:-?},${got_max:-?}] outside [${min},${max}]"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
+# ── Per-modality expected-value table ─────────────────
+# Single source of truth for attribute values. Subsequent issues update
+# rows here without modifying the assertion functions:
+#   #12 (CT signed/Rescale)  -> CT row pix_rep flips 0 -> 1
+#   #13 (modality-realistic) -> all rows get distinct rows/cols/bits_stored
+# Format: rows cols bits_stored pix_rep photometric
+declare -A PIXEL_EXPECTED=(
+    [ct]="64 64 16 0 MONOCHROME2"
+    [mr]="64 64 16 0 MONOCHROME2"
+    [cr]="64 64 16 0 MONOCHROME2"
+)
+
 # ── Tests ─────────────────────────────────────────────
 for modality in ct mr cr; do
     sample=$(find "${TEST_DATA_DIR}/${modality}" -name "*.dcm" 2>/dev/null | head -1)
@@ -97,9 +292,36 @@ for modality in ct mr cr; do
         print_skip "PixelData: ${modality^^} sample file not found"
         continue
     fi
-    assert_pixeldata_present "${modality^^} (first instance)" "${sample}" || true
-    assert_dcm2pnm_renders   "${modality^^} (first instance)" "${sample}" || true
+    label="${modality^^} (first instance)"
+
+    # Existing assertions (preserved unchanged)
+    assert_pixeldata_present "${label}" "${sample}" || true
+    assert_dcm2pnm_renders   "${label}" "${sample}" || true
+
+    # New attribute-level assertions (always-on)
+    entry="${PIXEL_EXPECTED[${modality}]:-}"
+    if [ -z "${entry}" ]; then
+        print_skip "PixelData: ${label} no expected-value table entry; skipping attribute checks"
+    else
+        read -r exp_rows exp_cols exp_bs exp_pr exp_pm <<<"${entry}"
+        assert_pixel_attributes   "${label}" "${sample}" \
+            "${exp_rows}" "${exp_cols}" "${exp_bs}" "${exp_pr}" "${exp_pm}" || true
+        assert_file_valid         "${label}" "${sample}" || true
+        assert_dcm2pnm_dimensions "${label}" "${sample}" "${exp_rows}" "${exp_cols}" || true
+
+        # Opt-in slow-path range assertion. Range stays wide (full uint16) until
+        # #13 narrows per-modality value ranges.
+        if [ "${PIXEL_RANGE_CHECK:-false}" = "true" ]; then
+            assert_pixel_range "${label}" "${sample}" 0 65535 || true
+        fi
+    fi
 done
+
+# Optional cross-modality count check, opt-in via env so the default behavior
+# stays unchanged regardless of the upstream generator's instance fan-out.
+if [ -n "${EXPECTED_INSTANCE_COUNT:-}" ]; then
+    assert_multi_instance_count "all modalities" "${TEST_DATA_DIR}" "${EXPECTED_INSTANCE_COUNT}" || true
+fi
 
 # ── Summary ───────────────────────────────────────────
 print_summary "PixelData"
