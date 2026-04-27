@@ -268,11 +268,29 @@ rm -rf data/ct data/mr data/cr
 GENERATE_PIXEL_DATA=true docker compose up -d --force-recreate pacs-server
 ```
 
-When enabled, every CT/MR/CR instance gains an Image Pixel Module
-(`Rows`, `Columns`, `BitsAllocated`, `BitsStored`, `HighBit`, `PixelRepresentation`,
-`SamplesPerPixel`, `PhotometricInterpretation`) and a `(7FE0,0010) OW` element
-containing a deterministic 64×64 16-bit horizontal gradient. Override the
-dimensions with `PIXEL_DATA_ROWS` / `PIXEL_DATA_COLS`.
+When enabled, every CT/MR/CR instance gains a **modality-realistic** Image Pixel
+Module (`Rows`, `Columns`, `BitsAllocated`, `BitsStored`, `HighBit`,
+`PixelRepresentation`, `SamplesPerPixel`, `PhotometricInterpretation`), a
+modality-appropriate display window, and a deterministic synthetic
+`(7FE0,0010) OW` buffer:
+
+| Modality | Rows × Cols (conservative) | Rows × Cols (realistic) | BitsStored | PixelRep | Pattern | Extras |
+|----------|---------------------------|--------------------------|------------|----------|---------|--------|
+| CT       | 128 × 128                 | 512 × 512                | 16         | 1 (signed)   | 7-band signed Hounsfield ramp (-1000..1000)        | RescaleIntercept/Slope/Type, W/L 400/40 |
+| MR       | 128 × 128                 | 256 × 256                | 12         | 0 (unsigned) | 4-band intensity ramp (CSF .. fat)                  | W/L 4096/2048                            |
+| CR       | 224 × 224                 | 1024 × 1024              | 14         | 0 (unsigned) | Chest silhouette (thorax + lung fields + spine)     | W/L 16383/8192, PresentationLUTShape=IDENTITY |
+
+Switch profile or override individual modalities via env vars:
+
+```bash
+# Switch all three modalities to realistic dimensions
+PIXEL_DATA_PROFILE=realistic GENERATE_PIXEL_DATA=true \
+    docker compose up -d --force-recreate pacs-server
+
+# Override one modality (e.g. CR) without touching the others
+GENERATE_PIXEL_DATA=true CR_PIXEL_ROWS=512 CR_PIXEL_COLS=512 \
+    docker compose up -d --force-recreate pacs-server
+```
 
 Verify with `dcmdump`:
 
@@ -317,9 +335,11 @@ cp env.default .env
 | `MAX_BYTES_PER_STUDY` | `1024mb` | Maximum bytes per study |
 | `LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
 | `GENERATE_TEST_DATA` | `true` | Generate synthetic data on startup |
-| `GENERATE_PIXEL_DATA` | `false` | Embed deterministic 16-bit MONOCHROME2 PixelData in generated files |
-| `PIXEL_DATA_ROWS` | `64` | Synthetic image rows when `GENERATE_PIXEL_DATA=true` |
-| `PIXEL_DATA_COLS` | `64` | Synthetic image columns when `GENERATE_PIXEL_DATA=true` |
+| `GENERATE_PIXEL_DATA` | `false` | Embed modality-realistic synthetic PixelData in generated files |
+| `PIXEL_DATA_PROFILE` | `conservative` | `conservative` (CT 128, MR 128, CR 224) or `realistic` (CT 512, MR 256, CR 1024) |
+| `CT_PIXEL_ROWS` / `CT_PIXEL_COLS` | (profile default) | Override CT dimensions independently of the profile |
+| `MR_PIXEL_ROWS` / `MR_PIXEL_COLS` | (profile default) | Override MR dimensions independently of the profile |
+| `CR_PIXEL_ROWS` / `CR_PIXEL_COLS` | (profile default) | Override CR dimensions independently of the profile |
 | `OID_ROOT` | `1.2.826.0.1.3680043.8.499` | OID root for test UIDs |
 
 ### dcmqrscp Configuration
