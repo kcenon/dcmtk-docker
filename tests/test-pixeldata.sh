@@ -316,16 +316,23 @@ assert_ct_rescale() {
 }
 
 # ── Per-modality expected-value table ─────────────────
-# Single source of truth for attribute values. Subsequent issues update
-# rows here without modifying the assertion functions:
-#   #12 (CT signed/Rescale)  -> CT pix_rep is now 1; CT-only Rescale tags
-#                                are asserted via assert_ct_rescale below.
-#   #13 (modality-realistic) -> all rows get distinct rows/cols/bits_stored
+# Single source of truth for attribute values. Mirrors the per-modality
+# matrix in scripts/generate-test-data.sh:
+#   #12 (CT signed/Rescale)  -> CT pix_rep=1; Rescale tags asserted via
+#                                 assert_ct_rescale below.
+#   #13 (modality-realistic) -> distinct rows/cols/bits_stored per modality:
+#                                 CT 128x128 BitsStored=16, MR 128x128
+#                                 BitsStored=12, CR 224x224 BitsStored=14
+#                                 (conservative profile defaults).
+# Each cell honors the matching {CT,MR,CR}_PIXEL_ROWS/_COLS env override so
+# this test stays aligned when the operator overrides individual modalities.
+# Note: PIXEL_DATA_PROFILE=realistic still requires the operator to also set
+# the per-modality dimension env vars for this test to track the new values.
 # Format: rows cols bits_stored pix_rep photometric
 declare -A PIXEL_EXPECTED=(
-    [ct]="64 64 16 1 MONOCHROME2"
-    [mr]="64 64 16 0 MONOCHROME2"
-    [cr]="64 64 16 0 MONOCHROME2"
+    [ct]="${CT_PIXEL_ROWS:-128} ${CT_PIXEL_COLS:-128} 16 1 MONOCHROME2"
+    [mr]="${MR_PIXEL_ROWS:-128} ${MR_PIXEL_COLS:-128} 12 0 MONOCHROME2"
+    [cr]="${CR_PIXEL_ROWS:-224} ${CR_PIXEL_COLS:-224} 14 0 MONOCHROME2"
 )
 
 # ── Tests ─────────────────────────────────────────────

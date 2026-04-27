@@ -10,8 +10,44 @@ set -e
 OUTPUT_DIR="${1:-${TEST_DATA_DIR:-/dicom/testdata}}"
 OID_ROOT="${OID_ROOT:-1.2.826.0.1.3680043.8.499}"
 GENERATE_PIXEL_DATA="${GENERATE_PIXEL_DATA:-false}"
-PIXEL_DATA_ROWS="${PIXEL_DATA_ROWS:-64}"
-PIXEL_DATA_COLS="${PIXEL_DATA_COLS:-64}"
+
+# PixelData profile selects per-modality default dimensions. Modality-specific
+# overrides (e.g. CT_PIXEL_ROWS) win over the profile default.
+PIXEL_DATA_PROFILE="${PIXEL_DATA_PROFILE:-conservative}"
+case "${PIXEL_DATA_PROFILE}" in
+    realistic)
+        DEFAULT_CT_ROWS=512;  DEFAULT_CT_COLS=512
+        DEFAULT_MR_ROWS=256;  DEFAULT_MR_COLS=256
+        DEFAULT_CR_ROWS=1024; DEFAULT_CR_COLS=1024
+        ;;
+    conservative)
+        DEFAULT_CT_ROWS=128;  DEFAULT_CT_COLS=128
+        DEFAULT_MR_ROWS=128;  DEFAULT_MR_COLS=128
+        DEFAULT_CR_ROWS=224;  DEFAULT_CR_COLS=224
+        ;;
+    *)
+        echo "[generate-test-data] WARNING: unknown PIXEL_DATA_PROFILE='${PIXEL_DATA_PROFILE}', falling back to conservative" >&2
+        DEFAULT_CT_ROWS=128;  DEFAULT_CT_COLS=128
+        DEFAULT_MR_ROWS=128;  DEFAULT_MR_COLS=128
+        DEFAULT_CR_ROWS=224;  DEFAULT_CR_COLS=224
+        PIXEL_DATA_PROFILE="conservative"
+        ;;
+esac
+
+CT_PIXEL_ROWS="${CT_PIXEL_ROWS:-${DEFAULT_CT_ROWS}}"
+CT_PIXEL_COLS="${CT_PIXEL_COLS:-${DEFAULT_CT_COLS}}"
+MR_PIXEL_ROWS="${MR_PIXEL_ROWS:-${DEFAULT_MR_ROWS}}"
+MR_PIXEL_COLS="${MR_PIXEL_COLS:-${DEFAULT_MR_COLS}}"
+CR_PIXEL_ROWS="${CR_PIXEL_ROWS:-${DEFAULT_CR_ROWS}}"
+CR_PIXEL_COLS="${CR_PIXEL_COLS:-${DEFAULT_CR_COLS}}"
+
+# The legacy uniform PIXEL_DATA_ROWS / PIXEL_DATA_COLS introduced by PR #10
+# would silently revert per-modality dimensions to a single shared value, so
+# they are deprecated and ignored. Warn loudly if the operator still sets them.
+if [ -n "${PIXEL_DATA_ROWS:-}" ] || [ -n "${PIXEL_DATA_COLS:-}" ]; then
+    echo "[generate-test-data] WARNING: PIXEL_DATA_ROWS / PIXEL_DATA_COLS are deprecated and ignored." >&2
+    echo "[generate-test-data]          Use {CT,MR,CR}_PIXEL_ROWS / _COLS or PIXEL_DATA_PROFILE instead." >&2
+fi
 
 # Skip if test data already exists
 if [ -d "${OUTPUT_DIR}" ] && [ "$(find "${OUTPUT_DIR}" -name '*.dcm' 2>/dev/null | wc -l)" -gt 0 ]; then
@@ -25,7 +61,7 @@ echo "[generate-test-data] Generating synthetic DICOM files..."
 echo "[generate-test-data] OID root: ${OID_ROOT}"
 echo "[generate-test-data] Output: ${OUTPUT_DIR}"
 if [ "${GENERATE_PIXEL_DATA}" = "true" ]; then
-    echo "[generate-test-data] PixelData: ${PIXEL_DATA_ROWS}x${PIXEL_DATA_COLS} 16-bit MONOCHROME2 (deterministic gradient)"
+    echo "[generate-test-data] PixelData: profile=${PIXEL_DATA_PROFILE}, CT ${CT_PIXEL_ROWS}x${CT_PIXEL_COLS}, MR ${MR_PIXEL_ROWS}x${MR_PIXEL_COLS}, CR ${CR_PIXEL_ROWS}x${CR_PIXEL_COLS}"
 else
     echo "[generate-test-data] PixelData: disabled (set GENERATE_PIXEL_DATA=true to enable)"
 fi
@@ -63,6 +99,152 @@ generate_pixel_data_file() {
     done
 
     # Single binary write via printf %b (no xxd / perl dependency required)
+    printf '%b' "${full_seq}" > "${outfile}"
+}
+
+# ── Helper: encode a 16-bit value as a "\\xLO\\xHI" little-endian hex token
+# Used by per-modality buffer generators to pre-encode unique values once so
+# the per-pixel inner loop can do pure bash string concatenation.
+encode_u16_le_hex() {
+    local val="$1"
+    printf '\\x%02x\\x%02x' "$(( val & 0xFF ))" "$(( (val >> 8) & 0xFF ))"
+}
+
+# ── Helper: encode an int16 (two's-complement) as little-endian hex ──
+encode_i16_le_hex() {
+    local val="$1"
+    if [ "$val" -lt 0 ]; then
+        val=$(( 65536 + val ))
+    fi
+    encode_u16_le_hex "$val"
+}
+
+# ── CT 7-band signed Hounsfield Unit pattern ────────
+# Vertical bands of HU values from air to bone. Two's-complement int16 encoding.
+# Pattern: air(-1000) -> fat(-100) -> soft(40) -> muscle(60) -> liver(100)
+#          -> contrast(600) -> bone(1000). One-band-per-column-range, identical
+# row-to-row, so the row sequence is built once and repeated.
+generate_ct_buffer() {
+    local rows="$1" cols="$2" outfile="$3"
+    local hu_values=(-1000 -100 40 60 100 600 1000)
+    local n_bands=${#hu_values[@]}
+
+    local -a band_hex
+    local i
+    for ((i = 0; i < n_bands; i++)); do
+        band_hex[i]=$(encode_i16_le_hex "${hu_values[i]}")
+    done
+
+    local row_seq="" x band
+    for ((x = 0; x < cols; x++)); do
+        band=$(( x * n_bands / cols ))
+        [ "$band" -ge "$n_bands" ] && band=$((n_bands - 1))
+        row_seq+="${band_hex[band]}"
+    done
+
+    local full_seq="" y
+    for ((y = 0; y < rows; y++)); do
+        full_seq+="${row_seq}"
+    done
+
+    printf '%b' "${full_seq}" > "${outfile}"
+}
+
+# ── MR 4-band intensity pattern (12-bit unsigned) ────
+# CSF(256) -> gray-matter(1024) -> white-matter(2400) -> fat(3800).
+# 1D pattern, same per-row build-and-repeat strategy as CT.
+generate_mr_buffer() {
+    local rows="$1" cols="$2" outfile="$3"
+    local mr_values=(256 1024 2400 3800)
+    local n_bands=${#mr_values[@]}
+
+    local -a band_hex
+    local i
+    for ((i = 0; i < n_bands; i++)); do
+        band_hex[i]=$(encode_u16_le_hex "${mr_values[i]}")
+    done
+
+    local row_seq="" x band
+    for ((x = 0; x < cols; x++)); do
+        band=$(( x * n_bands / cols ))
+        [ "$band" -ge "$n_bands" ] && band=$((n_bands - 1))
+        row_seq+="${band_hex[band]}"
+    done
+
+    local full_seq="" y
+    for ((y = 0; y < rows; y++)); do
+        full_seq+="${row_seq}"
+    done
+
+    printf '%b' "${full_seq}" > "${outfile}"
+}
+
+# ── CR chest-silhouette pattern (14-bit unsigned, 2D) ─
+# Background ellipse silhouette with two narrow lung-field stripes and a
+# central spine stripe. Inner loop is pure bash concat over a 4-entry hex
+# lookup so a 224x224 CR buffer stays under ~500 ms on a typical CI runner.
+# Escape hatch: switch to perl-base if this becomes a CI bottleneck (the
+# slim image already has perl-base available — see #13 Performance section).
+generate_cr_buffer() {
+    local rows="$1" cols="$2" outfile="$3"
+    local v_bg=500 v_thorax=8000 v_lung=1500 v_spine=15000
+
+    local hex_bg hex_thorax hex_lung hex_spine
+    hex_bg=$(encode_u16_le_hex "$v_bg")
+    hex_thorax=$(encode_u16_le_hex "$v_thorax")
+    hex_lung=$(encode_u16_le_hex "$v_lung")
+    hex_spine=$(encode_u16_le_hex "$v_spine")
+
+    local cx=$(( cols / 2 ))
+    local cy=$(( rows / 2 ))
+    local rx=$(( (cols * 2) / 5 ))
+    local ry=$(( (rows * 9) / 20 ))
+    [ "$rx" -lt 1 ] && rx=1
+    [ "$ry" -lt 1 ] && ry=1
+    local rx_sq=$(( rx * rx ))
+    local ry_sq=$(( ry * ry ))
+
+    local lung_l=$(( cols * 30 / 100 ))
+    local lung_r=$(( cols * 70 / 100 ))
+    local lung_hw=$(( cols / 50 ))
+    [ "$lung_hw" -lt 1 ] && lung_hw=1
+
+    local spine_hw=$(( cols / 100 ))
+    [ "$spine_hw" -lt 1 ] && spine_hw=1
+
+    local full_seq="" y x dy dy_sq term dx dx_sq
+    for ((y = 0; y < rows; y++)); do
+        dy=$(( y - cy ))
+        dy_sq=$(( dy * dy ))
+        if [ "$dy_sq" -ge "$ry_sq" ]; then
+            term=-1
+        else
+            term=$(( rx_sq - (dy_sq * rx_sq) / ry_sq ))
+        fi
+
+        for ((x = 0; x < cols; x++)); do
+            # Spine stripe overrides everything (full-height central column).
+            if (( x >= cx - spine_hw && x <= cx + spine_hw )); then
+                full_seq+="${hex_spine}"
+                continue
+            fi
+
+            dx=$(( x - cx ))
+            dx_sq=$(( dx * dx ))
+
+            if (( term >= 0 )) && (( dx_sq <= term )); then
+                if (( (x >= lung_l - lung_hw && x <= lung_l + lung_hw) || \
+                      (x >= lung_r - lung_hw && x <= lung_r + lung_hw) )); then
+                    full_seq+="${hex_lung}"
+                else
+                    full_seq+="${hex_thorax}"
+                fi
+            else
+                full_seq+="${hex_bg}"
+            fi
+        done
+    done
+
     printf '%b' "${full_seq}" > "${outfile}"
 }
 
@@ -127,23 +309,49 @@ create_dicom() {
 DUMP
 
     if [ "${GENERATE_PIXEL_DATA}" = "true" ]; then
-        # Cache the pixel buffer per (rows, cols) — identical bytes for every
-        # instance keeps generation deterministic and avoids repeated work.
-        local pixel_file="${TMPDIR}/pixels_${PIXEL_DATA_ROWS}x${PIXEL_DATA_COLS}.bin"
-        if [ ! -s "${pixel_file}" ]; then
-            generate_pixel_data_file "${PIXEL_DATA_ROWS}" "${PIXEL_DATA_COLS}" "${pixel_file}"
-        fi
+        # Resolve per-modality dimensions, attribute values, and the buffer
+        # generator from the profile/override matrix configured at script start.
+        # The PIXEL_EXPECTED table in tests/test-pixeldata.sh is the single
+        # source of truth that mirrors these per-modality values.
+        local mod_lc="${modality,,}"
+        local rows cols bits_stored high_bit pix_rep extras
+        case "${mod_lc}" in
+            ct)
+                rows="${CT_PIXEL_ROWS}"; cols="${CT_PIXEL_COLS}"
+                bits_stored=16; high_bit=15; pix_rep=1
+                # CT (PS3.3 C.8.2.1): Rescale tags map stored values to HU,
+                # plus a soft-tissue display window (W/L 400/40).
+                extras=$'\n(0028,1052) DS [-1024]\n(0028,1053) DS [1.0]\n(0028,1054) LO [HU]\n(0028,1050) DS [40]\n(0028,1051) DS [400]'
+                ;;
+            mr)
+                rows="${MR_PIXEL_ROWS}"; cols="${MR_PIXEL_COLS}"
+                bits_stored=12; high_bit=11; pix_rep=0
+                # MR (PS3.3 C.8.3.1): intensity-based window, no Rescale tags.
+                extras=$'\n(0028,1050) DS [2048]\n(0028,1051) DS [4096]'
+                ;;
+            cr)
+                rows="${CR_PIXEL_ROWS}"; cols="${CR_PIXEL_COLS}"
+                bits_stored=14; high_bit=13; pix_rep=0
+                # CR (PS3.3 C.8.1.2): wide window plus identity presentation LUT.
+                extras=$'\n(0028,1050) DS [8192]\n(0028,1051) DS [16383]\n(2050,0020) CS [IDENTITY]'
+                ;;
+            *)
+                # Unknown modality: fall back to the legacy uniform 16-bit
+                # unsigned gradient, sized to CT defaults.
+                rows="${CT_PIXEL_ROWS}"; cols="${CT_PIXEL_COLS}"
+                bits_stored=16; high_bit=15; pix_rep=0; extras=""
+                ;;
+        esac
 
-        # Per DICOM PS3.3 C.8.2.1, the CT Image Module requires
-        # PixelRepresentation=1 (signed two's complement) and RescaleIntercept/
-        # RescaleSlope (both Type 1) so stored values map to Hounsfield Units.
-        # MR and CR keep the unsigned representation and emit no Rescale tags,
-        # so their dump output stays byte-identical to the pre-fix baseline.
-        local pix_rep="0"
-        local rescale_tags=""
-        if [ "${modality}" = "CT" ]; then
-            pix_rep="1"
-            rescale_tags=$'\n(0028,1052) DS [-1024]\n(0028,1053) DS [1.0]\n(0028,1054) LO [HU]'
+        # Per-modality cache key prevents cross-modality buffer collisions.
+        local pixel_file="${TMPDIR}/pixels_${mod_lc}_${rows}x${cols}.bin"
+        if [ ! -s "${pixel_file}" ]; then
+            case "${mod_lc}" in
+                ct) generate_ct_buffer "${rows}" "${cols}" "${pixel_file}" ;;
+                mr) generate_mr_buffer "${rows}" "${cols}" "${pixel_file}" ;;
+                cr) generate_cr_buffer "${rows}" "${cols}" "${pixel_file}" ;;
+                *)  generate_pixel_data_file "${rows}" "${cols}" "${pixel_file}" ;;
+            esac
         fi
 
         cat >> "${dump_file}" << PIXDUMP
@@ -151,12 +359,12 @@ DUMP
 # Image Pixel Module
 (0028,0002) US 1
 (0028,0004) CS [MONOCHROME2]
-(0028,0010) US ${PIXEL_DATA_ROWS}
-(0028,0011) US ${PIXEL_DATA_COLS}
+(0028,0010) US ${rows}
+(0028,0011) US ${cols}
 (0028,0100) US 16
-(0028,0101) US 16
-(0028,0102) US 15
-(0028,0103) US ${pix_rep}${rescale_tags}
+(0028,0101) US ${bits_stored}
+(0028,0102) US ${high_bit}
+(0028,0103) US ${pix_rep}${extras}
 (7FE0,0010) OW =${pixel_file}
 PIXDUMP
     fi
