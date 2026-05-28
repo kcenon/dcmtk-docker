@@ -24,12 +24,15 @@ run_find_test() {
     shift 2
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
+    # Capture findscu output stripped of NUL bytes so `ignored null byte`
+    # warnings from shell variable assignment do not appear in test logs.
     local output
-    output=$("$@" 2>&1 || true)
+    output=$("$@" 2>&1 | tr -d '\0' || true)
 
-    # Count UID lines in the response — each matching record contains a UID
+    # Count UID lines from response datasets (excluding the verbose
+    # request-key echo). See count_find_responses in test-helpers.sh.
     local uid_count
-    uid_count=$(echo "${output}" | grep -c "StudyInstanceUID\|SeriesInstanceUID\|SOPInstanceUID" 2>/dev/null || echo "0")
+    uid_count=$(count_find_responses "${output}")
 
     if [ "${uid_count}" -ge "${expected_min}" ]; then
         print_pass "C-FIND: ${description} (found ${uid_count}, expected >= ${expected_min})"
@@ -139,13 +142,8 @@ NEG_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
     -S "${PACS_HOST}" "${PACS_PORT}" \
     -k QueryRetrieveLevel=STUDY \
     -k PatientID="NONEXISTENT" \
-    -k StudyInstanceUID 2>&1 || true)
-# Verbose findscu echoes the empty request key as
-# "(0020,000d) UI (no value available) ... StudyInstanceUID"
-# which would otherwise inflate the count even when zero studies match.
-# Use "|| true" instead of "|| echo 0" so a zero match (grep -vc exit 1)
-# does not append a second "0" to the captured value and break -eq.
-NEG_COUNT=$(echo "${NEG_OUTPUT}" | grep "StudyInstanceUID" | grep -vc "no value available" || true)
+    -k StudyInstanceUID 2>&1 | tr -d '\0' || true)
+NEG_COUNT=$(count_find_responses "${NEG_OUTPUT}" StudyInstanceUID)
 if [ "${NEG_COUNT}" -eq 0 ]; then
     print_pass "C-FIND: nonexistent patient returns 0 results"
     TEST_PASSED=$((TEST_PASSED + 1))
