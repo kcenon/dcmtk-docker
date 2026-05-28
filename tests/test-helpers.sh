@@ -27,6 +27,12 @@ fi
 # Set by test-all.sh via environment; individual scripts default to off.
 VERBOSE="${VERBOSE:-false}"
 
+# ── Canonical OID root ────────────────────────────────
+# Single source of truth for the test-data OID root. Must match
+# scripts/generate-test-data.sh and env.default so standalone test
+# scripts query the same UIDs that the generator produces.
+DEFAULT_OID_ROOT="1.2.826.0.1.3680043.8.499"
+
 # ── Counters ──────────────────────────────────────────
 TEST_PASSED=0
 TEST_FAILED=0
