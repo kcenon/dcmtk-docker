@@ -286,3 +286,170 @@ ensure_clean_pacs() {
     echo "  ensure_clean_pacs: ${pacs_ae}@${pacs_host}:${pacs_port} is empty"
     return 0
 }
+
+# ── C-MOVE receiver verification helpers ──────────────────────
+# These helpers let C-MOVE tests verify that the requested instances
+# actually arrived at the storescp-receiver destination, instead of
+# trusting movescu's exit code alone. They depend on the receiver
+# storage volume (`received-data`) being mounted into test-client at
+# ${STORESCP_STORAGE_DIR} (default /dicom/received); see issue #33.
+#
+# Layout: storescp runs with `--sort-on-study-uid prefix`, which
+# produces `<prefix><StudyInstanceUID>/<file>.dcm` under the storage
+# directory. The helpers below use `find` + DICOM tags from dcmdump
+# rather than assuming a specific directory layout, so they stay
+# robust if the sorting strategy changes.
+
+# Resolve the receiver storage directory (env override → default).
+receiver_storage_dir() {
+    echo "${STORESCP_STORAGE_DIR:-/dicom/received}"
+}
+
+# Remove every previously-received instance under the receiver storage
+# directory. Non-destructive on the directory itself so storescp can
+# keep writing new files into it without restarting.
+#
+# Usage: receiver_cleanup_storage [storage_dir]
+receiver_cleanup_storage() {
+    local storage_dir="${1:-$(receiver_storage_dir)}"
+
+    if [ ! -d "${storage_dir}" ]; then
+        echo "ERROR: receiver_cleanup_storage: ${storage_dir} not mounted in test-client" >&2
+        echo "       Ensure docker-compose.yml mounts received-data into test-client." >&2
+        return 1
+    fi
+
+    # Delete every regular file and empty sub-directory below storage_dir,
+    # but keep storage_dir itself so storescp can continue writing.
+    find "${storage_dir}" -mindepth 1 -delete 2>/dev/null || true
+    print_verbose "receiver_cleanup_storage: wiped ${storage_dir}"
+    return 0
+}
+
+# Count .dcm files under the receiver storage directory.
+#
+# Usage: receiver_dcm_count [storage_dir]
+# Prints the file count on stdout.
+receiver_dcm_count() {
+    local storage_dir="${1:-$(receiver_storage_dir)}"
+
+    if [ ! -d "${storage_dir}" ]; then
+        echo "0"
+        return 1
+    fi
+
+    find "${storage_dir}" -type f -name '*.dcm' 2>/dev/null | wc -l | tr -d ' '
+}
+
+# Dump receiver storage contents on failure to aid debugging.
+#
+# Usage: receiver_dump_storage [storage_dir]
+receiver_dump_storage() {
+    local storage_dir="${1:-$(receiver_storage_dir)}"
+
+    echo "       Receiver storage (${storage_dir}):"
+    if [ -d "${storage_dir}" ]; then
+        find "${storage_dir}" -type f -name '*.dcm' 2>/dev/null \
+            | head -20 \
+            | sed 's/^/         /' \
+            || true
+    else
+        echo "         (not mounted)"
+    fi
+}
+
+# Verify that exactly `expected` .dcm files exist under the receiver
+# storage directory. Increments TEST_TOTAL and TEST_PASSED/FAILED so
+# the C-MOVE suite picks up the result via print_summary.
+#
+# Usage: verify_move_count "<test label>" <expected> [storage_dir]
+verify_move_count() {
+    local label="$1"
+    local expected="$2"
+    local storage_dir="${3:-$(receiver_storage_dir)}"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+    local actual
+    actual=$(receiver_dcm_count "${storage_dir}")
+
+    if [ "${actual}" = "${expected}" ]; then
+        print_pass "C-MOVE: ${label} (received ${actual}/${expected} instances)"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "C-MOVE: ${label} (received ${actual} instances, expected ${expected})"
+    receiver_dump_storage "${storage_dir}"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
+# Verify that every .dcm file under the receiver storage directory
+# carries the expected StudyInstanceUID and, when provided, the
+# expected SeriesInstanceUID. Uses dcmdump's +P selector to read
+# specific tags without parsing the full dataset.
+#
+# Usage: verify_move_uids "<test label>" <study_uid> [series_uid] [storage_dir]
+verify_move_uids() {
+    local label="$1"
+    local study_uid="$2"
+    local series_uid="${3:-}"
+    local storage_dir="${4:-$(receiver_storage_dir)}"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    if ! command -v dcmdump >/dev/null 2>&1; then
+        print_fail "C-MOVE: ${label} (dcmdump not available)"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    fi
+
+    local files file extracted mismatched_study=0 mismatched_series=0 missing_sop=0 scanned=0
+    files=$(find "${storage_dir}" -type f -name '*.dcm' 2>/dev/null)
+
+    if [ -z "${files}" ]; then
+        print_fail "C-MOVE: ${label} (no instances to inspect under ${storage_dir})"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    fi
+
+    while IFS= read -r file; do
+        [ -z "${file}" ] && continue
+        scanned=$((scanned + 1))
+
+        extracted=$(dcmdump +P StudyInstanceUID "${file}" 2>/dev/null \
+            | sed -n 's/.*\[\([^]]*\)\].*/\1/p' | head -1)
+        if [ "${extracted}" != "${study_uid}" ]; then
+            mismatched_study=$((mismatched_study + 1))
+            print_verbose "verify_move_uids: study mismatch in ${file} (got '${extracted}', expected '${study_uid}')"
+        fi
+
+        if [ -n "${series_uid}" ]; then
+            extracted=$(dcmdump +P SeriesInstanceUID "${file}" 2>/dev/null \
+                | sed -n 's/.*\[\([^]]*\)\].*/\1/p' | head -1)
+            if [ "${extracted}" != "${series_uid}" ]; then
+                mismatched_series=$((mismatched_series + 1))
+                print_verbose "verify_move_uids: series mismatch in ${file} (got '${extracted}', expected '${series_uid}')"
+            fi
+        fi
+
+        extracted=$(dcmdump +P SOPInstanceUID "${file}" 2>/dev/null \
+            | sed -n 's/.*\[\([^]]*\)\].*/\1/p' | head -1)
+        if [ -z "${extracted}" ]; then
+            missing_sop=$((missing_sop + 1))
+        fi
+    done <<EOF
+${files}
+EOF
+
+    if [ "${mismatched_study}" -eq 0 ] && [ "${mismatched_series}" -eq 0 ] && [ "${missing_sop}" -eq 0 ]; then
+        print_pass "C-MOVE: ${label} (${scanned} instances match expected UIDs)"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "C-MOVE: ${label} (scanned=${scanned} study-mismatch=${mismatched_study} series-mismatch=${mismatched_series} missing-sop=${missing_sop})"
+    receiver_dump_storage "${storage_dir}"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
