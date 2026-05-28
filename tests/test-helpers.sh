@@ -194,21 +194,23 @@ ensure_pacs_data() {
 # of test data after the wipe (callers typically follow with storescu).
 #
 # The container hosting dcmqrscp is identified by ${pacs_host} which, in
-# the docker-compose setup, doubles as the container_name. Storage is
-# wiped via `docker exec` against that container's STORAGE_DIR.
+# the docker-compose setup, doubles as the compose service name. Storage
+# is wiped via `docker compose exec` against that service's STORAGE_DIR,
+# which scopes naturally to the active compose project so parallel
+# stacks do not collide.
 #
 # Usage:
-#   ensure_clean_pacs "host" "port" "called_ae" "calling_ae" [container_name] [storage_dir]
+#   ensure_clean_pacs "host" "port" "called_ae" "calling_ae" [service] [storage_dir]
 #
 # Defaults:
-#   container_name -> ${pacs_host}
-#   storage_dir    -> /dicom/db (matches docker-compose pacs-server config)
+#   service     -> ${pacs_host}
+#   storage_dir -> /dicom/db (matches docker-compose pacs-server config)
 ensure_clean_pacs() {
     local pacs_host="$1"
     local pacs_port="$2"
     local pacs_ae="$3"
     local my_ae="$4"
-    local container_name="${5:-${pacs_host}}"
+    local service="${5:-${pacs_host}}"
     local storage_dir="${6:-/dicom/db}"
 
     # Verify the SCP responds before attempting destructive work
@@ -218,17 +220,33 @@ ensure_clean_pacs() {
         return 1
     fi
 
+    # Detect docker compose binary (v2 plugin preferred, legacy fallback)
+    local dc=""
+    if command -v docker >/dev/null 2>&1; then
+        if docker compose version >/dev/null 2>&1; then
+            dc="docker compose"
+        elif command -v docker-compose >/dev/null 2>&1; then
+            dc="docker-compose"
+        fi
+    fi
+
+    # Resolve the compose service to a container ID under the current
+    # compose project, so we never assume a fixed container_name.
+    local container_id=""
+    if [ -n "${dc}" ]; then
+        container_id=$(${dc} ps -q "${service}" 2>/dev/null | head -n1)
+    fi
+
     # Wipe the PACS storage directory inside the container.
     # Two strategies, in order of preference:
-    #   1. docker exec (when running on the host with the docker CLI)
-    #   2. direct rm   (when this helper is itself running inside the PACS container)
-    if command -v docker >/dev/null 2>&1 && \
-            docker inspect "${container_name}" >/dev/null 2>&1; then
-        echo "Wiping PACS storage in container ${container_name}:${storage_dir}"
-        docker exec "${container_name}" sh -c \
+    #   1. docker compose exec/restart (when running on the host with docker compose)
+    #   2. direct rm                   (when this helper is itself running inside the PACS container)
+    if [ -n "${dc}" ] && [ -n "${container_id}" ]; then
+        echo "Wiping PACS storage in service ${service}:${storage_dir}"
+        ${dc} exec -T "${service}" sh -c \
             "find '${storage_dir}' -mindepth 1 -delete 2>/dev/null || true"
         # Restart dcmqrscp so the index is re-read from the now-empty dir
-        docker restart "${container_name}" >/dev/null 2>&1 || true
+        ${dc} restart "${service}" >/dev/null 2>&1 || true
         # Wait for the container to come back online
         local i
         for i in $(seq 1 30); do
@@ -242,7 +260,7 @@ ensure_clean_pacs() {
         echo "Wiping PACS storage at ${storage_dir} (in-container mode)"
         find "${storage_dir}" -mindepth 1 -delete 2>/dev/null || true
     else
-        echo "WARNING: ensure_clean_pacs: no docker CLI access and ${storage_dir} not writable" >&2
+        echo "WARNING: ensure_clean_pacs: no docker compose access and ${storage_dir} not writable" >&2
         echo "         PACS will not be wiped; tests may observe pre-existing data." >&2
         return 0
     fi

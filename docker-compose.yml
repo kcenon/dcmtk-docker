@@ -3,7 +3,6 @@ services:
   # Full PACS with C-ECHO, C-STORE, C-FIND, C-MOVE via dcmqrscp
   pacs-server:
     build: .
-    container_name: pacs-server
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
@@ -49,7 +48,6 @@ services:
   # Second PACS instance for multi-PACS testing scenarios
   pacs-server-2:
     build: .
-    container_name: pacs-server-2
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
@@ -85,7 +83,6 @@ services:
   # Lightweight receiver for C-MOVE retrieval testing
   storescp-receiver:
     build: .
-    container_name: storescp-receiver
     environment:
       - ROLE=storescp
       - AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
@@ -110,7 +107,6 @@ services:
   # Interactive container with all DCMTK SCU tools
   test-client:
     build: .
-    container_name: test-client
     environment:
       - ROLE=test-client
       - AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}

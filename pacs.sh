@@ -49,6 +49,13 @@ ensure_env() {
     fi
 }
 
+# Resolve a compose service name to its current container ID under the
+# active compose project. Prints the ID on stdout (empty if no container).
+service_container_id() {
+    local service="$1"
+    ${DC} ps -q "${service}" 2>/dev/null | head -n1
+}
+
 read_env_value() {
     local key="$1"
     local default="$2"
@@ -111,9 +118,14 @@ wait_for_services() {
 
     while [ "${elapsed}" -lt "${timeout}" ]; do
         local pending=()
-        local svc health
+        local svc cid health
         for svc in "${services[@]}"; do
-            health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${svc}" 2>/dev/null || echo "missing")
+            cid=$(service_container_id "${svc}")
+            if [ -z "${cid}" ]; then
+                health="missing"
+            else
+                health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${cid}" 2>/dev/null || echo "missing")
+            fi
             if [ "${health}" != "healthy" ]; then
                 pending+=("${svc}")
             fi
@@ -130,8 +142,13 @@ wait_for_services() {
 
     err "Timeout waiting for healthy status after ${timeout}s"
     for svc in "${services[@]}"; do
-        local health
-        health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${svc}" 2>/dev/null || echo "missing")
+        local cid health
+        cid=$(service_container_id "${svc}")
+        if [ -z "${cid}" ]; then
+            health="missing"
+        else
+            health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${cid}" 2>/dev/null || echo "missing")
+        fi
         if [ "${health}" != "healthy" ]; then
             warn "Service ${svc} is not healthy (status: ${health}); recent logs:"
             ${DC} logs --tail=50 "${svc}" 2>&1 || true
@@ -146,12 +163,19 @@ print_status_table() {
     printf "%-20s %-12s %-14s %-10s\n" "────────────────────" "────────────" "──────────────" "──────────"
 
     for svc in "${ALL_SERVICES[@]}"; do
-        local status ae_title port
+        local status ae_title port cid
+
+        cid=$(service_container_id "${svc}")
 
         # Container status
         local state health
-        state=$(docker inspect --format='{{.State.Status}}' "${svc}" 2>/dev/null || echo "not found")
-        health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' "${svc}" 2>/dev/null || echo "-")
+        if [ -z "${cid}" ]; then
+            state="not found"
+            health="-"
+        else
+            state=$(docker inspect --format='{{.State.Status}}' "${cid}" 2>/dev/null || echo "not found")
+            health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' "${cid}" 2>/dev/null || echo "-")
+        fi
 
         if [ "${state}" = "running" ] && [ "${health}" = "healthy" ]; then
             status="${C_GREEN}healthy${C_RESET}"
@@ -164,12 +188,20 @@ print_status_table() {
         fi
 
         # AE Title from container env
-        ae_title=$(docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' "${svc}" 2>/dev/null \
-            | grep '^AE_TITLE=' | cut -d= -f2 || echo "-")
+        if [ -n "${cid}" ]; then
+            ae_title=$(docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' "${cid}" 2>/dev/null \
+                | grep '^AE_TITLE=' | cut -d= -f2 || echo "-")
+        else
+            ae_title="-"
+        fi
         [ -z "${ae_title}" ] && ae_title="-"
 
         # Host port mapping
-        port=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}}{{end}}{{end}}' "${svc}" 2>/dev/null || echo "-")
+        if [ -n "${cid}" ]; then
+            port=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}}{{end}}{{end}}' "${cid}" 2>/dev/null || echo "-")
+        else
+            port="-"
+        fi
         [ -z "${port}" ] && port="-"
 
         printf "%-20s %-22b %-14s %-10s\n" "${svc}" "${status}" "${ae_title}" "${port}"
@@ -198,9 +230,9 @@ cmd_down() {
 }
 
 cmd_status() {
-    # Check if any container exists
+    # Check if any container exists for this compose project
     local running
-    running=$(docker ps --filter "name=pacs-server" --filter "name=storescp-receiver" --filter "name=test-client" -q 2>/dev/null | wc -l | tr -d ' ')
+    running=$(${DC} ps -q 2>/dev/null | wc -l | tr -d ' ')
 
     if [ "${running}" -eq 0 ]; then
         warn "No services are running. Start with: ./pacs.sh up"
@@ -236,8 +268,13 @@ cmd_test() {
     fi
 
     # Check if test-client is running
-    local state
-    state=$(docker inspect --format='{{.State.Status}}' test-client 2>/dev/null || echo "not found")
+    local cid state
+    cid=$(service_container_id test-client)
+    if [ -z "${cid}" ]; then
+        state="not found"
+    else
+        state=$(docker inspect --format='{{.State.Status}}' "${cid}" 2>/dev/null || echo "not found")
+    fi
     if [ "${state}" != "running" ]; then
         err "test-client container is not running. Start with: ./pacs.sh up"
         exit 1
@@ -279,8 +316,13 @@ cmd_logs() {
 }
 
 cmd_shell() {
-    local state
-    state=$(docker inspect --format='{{.State.Status}}' test-client 2>/dev/null || echo "not found")
+    local cid state
+    cid=$(service_container_id test-client)
+    if [ -z "${cid}" ]; then
+        state="not found"
+    else
+        state=$(docker inspect --format='{{.State.Status}}' "${cid}" 2>/dev/null || echo "not found")
+    fi
     if [ "${state}" != "running" ]; then
         err "test-client container is not running. Start with: ./pacs.sh up"
         exit 1
@@ -345,8 +387,13 @@ cmd_echo() {
         fi
     else
         # Fallback: use test-client container
-        local state
-        state=$(docker inspect --format='{{.State.Status}}' test-client 2>/dev/null || echo "not found")
+        local cid state
+        cid=$(service_container_id test-client)
+        if [ -z "${cid}" ]; then
+            state="not found"
+        else
+            state=$(docker inspect --format='{{.State.Status}}' "${cid}" 2>/dev/null || echo "not found")
+        fi
         if [ "${state}" != "running" ]; then
             err "No local echoscu and test-client is not running"
             exit 1
