@@ -90,9 +90,9 @@ FIND_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
     -S "${PACS_HOST}" "${PACS_PORT}" \
     -k QueryRetrieveLevel=STUDY \
     -k PatientName="*" \
-    -k StudyInstanceUID 2>&1 || true)
+    -k StudyInstanceUID 2>&1 | tr -d '\0' || true)
 
-STUDY_COUNT=$(echo "${FIND_OUTPUT}" | grep -c "StudyInstanceUID" 2>/dev/null || echo "0")
+STUDY_COUNT=$(count_find_responses "${FIND_OUTPUT}" StudyInstanceUID)
 if [ "${STUDY_COUNT}" -ge 3 ]; then
     print_pass "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= 3)"
     print_verbose "Stored ${TOTAL_FILES} files across 3 patients"

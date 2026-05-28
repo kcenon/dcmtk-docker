@@ -134,6 +134,52 @@ run_test_expect_fail() {
     fi
 }
 
+# ── C-FIND response counting ──────────────────────────
+# Count UID lines from a `findscu -v` capture that belong to response
+# datasets (not the request key echo).
+#
+# Verbose findscu prints each request key once before the association,
+# typically as
+#   (0020,000d) UI (no value available)         #   0, 1 StudyInstanceUID
+# and then prints one response dataset per match, where the same tag
+# carries an actual UID value. Counting bare "StudyInstanceUID"
+# occurrences therefore inflates the result by exactly one per request
+# key. Filtering out lines that contain "no value available" leaves only
+# response datasets.
+#
+# The helper also strips NUL bytes from the captured output. `findscu`
+# can emit raw DICOM bytes on stderr when servers misbehave, which makes
+# shell `grep` warn `ignored null byte in input` and pollutes the test
+# log.
+#
+# Output: a single non-negative integer on stdout, nothing else.
+#
+# Usage: count_find_responses "<findscu -v output>" [tag1 tag2 ...]
+#   When no tags are supplied the default set covers the three common
+#   query-retrieve level UIDs.
+count_find_responses() {
+    local output="$1"
+    shift
+    local tags=("$@")
+    if [ "${#tags[@]}" -eq 0 ]; then
+        tags=(StudyInstanceUID SeriesInstanceUID SOPInstanceUID)
+    fi
+
+    local pattern
+    pattern="$(IFS='|'; printf '%s' "${tags[*]}")"
+
+    local count
+    count=$(printf '%s' "${output}" \
+        | tr -d '\0' \
+        | grep -E "${pattern}" \
+        | grep -vc "no value available" \
+        || true)
+
+    # `grep -c` with no matches exits 1; `|| true` suppresses set -e but
+    # leaves count empty. Normalise to 0 so callers can use -eq / -ge.
+    printf '%s' "${count:-0}"
+}
+
 # ── Verify SCP reachability via C-ECHO ────────────────
 # Usage: ensure_scp_reachable "label" "host" "port" "called_ae" "calling_ae"
 # Returns 0 if reachable, 1 otherwise. Prints a one-line preamble status.
@@ -173,12 +219,14 @@ ensure_pacs_data() {
         fi
     fi
 
-    # Check if PACS already has data
+    # Check if PACS already has data. Strip NUL bytes from the capture so
+    # they do not trigger `ignored null byte` warnings in the test log.
     local check_output existing
-    check_output=$(findscu -aet "${my_ae}" -aec "${pacs_ae}" \
+    check_output=$(findscu -v -aet "${my_ae}" -aec "${pacs_ae}" \
         -S "${pacs_host}" "${pacs_port}" \
-        -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID 2>&1 || true)
-    existing=$(echo "${check_output}" | grep -c "StudyInstanceUID" 2>/dev/null || echo "0")
+        -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID 2>&1 \
+        | tr -d '\0' || true)
+    existing=$(count_find_responses "${check_output}" StudyInstanceUID)
 
     if [ "${existing}" -lt 3 ]; then
         echo "Loading test data into PACS..."
@@ -220,12 +268,14 @@ ensure_clean_pacs() {
     fi
 
     # Query for any remaining studies; the host-side caller is responsible
-    # for wiping PACS storage before this helper runs.
+    # for wiping PACS storage before this helper runs. Strip NUL bytes from
+    # the capture so they do not trigger `ignored null byte` warnings.
     local check_output remaining
-    check_output=$(findscu -aet "${my_ae}" -aec "${pacs_ae}" \
+    check_output=$(findscu -v -aet "${my_ae}" -aec "${pacs_ae}" \
         -S "${pacs_host}" "${pacs_port}" \
-        -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID 2>&1 || true)
-    remaining=$(echo "${check_output}" | grep -c "StudyInstanceUID" 2>/dev/null || echo "0")
+        -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID 2>&1 \
+        | tr -d '\0' || true)
+    remaining=$(count_find_responses "${check_output}" StudyInstanceUID)
 
     if [ "${remaining}" -gt 0 ]; then
         echo "ERROR: ensure_clean_pacs: ${remaining} studies remain on ${pacs_ae}@${pacs_host}:${pacs_port}" >&2
