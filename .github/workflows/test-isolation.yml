@@ -89,6 +89,27 @@ jobs:
           done
           exit 1
 
+      - name: Wipe PACS storage on the host before test-store.sh
+        # test-store.sh requires an empty PACS so its >= 3 study-count
+        # check is meaningful. The PACS entrypoint indexes synthetic test
+        # data on first boot, so cleanup must run on the host (the
+        # test-client image has no Docker CLI). See issue #19.
+        if: matrix.test == 'test-store.sh'
+        run: |
+          for svc in pacs-server pacs-server-2; do
+            docker compose exec -T "$svc" sh -c \
+              "find /dicom/db -mindepth 1 -delete 2>/dev/null || true"
+          done
+          docker compose restart pacs-server pacs-server-2
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server healthy after cleanup"
+              break
+            fi
+            sleep 2
+          done
+
       - name: Run ${{ matrix.test }} in isolation
         run: |
           docker compose exec -T test-client /tests/${{ matrix.test }}
@@ -237,8 +258,44 @@ jobs:
           done
           exit 1
 
+      - name: Wipe PACS storage on the host before first run
+        # The PACS entrypoint indexes synthetic test data on first boot,
+        # so the volumes are dirty even before any storescu. Cleanup must
+        # run on the host (the test-client image has no Docker CLI). See
+        # issue #19.
+        run: |
+          for svc in pacs-server pacs-server-2; do
+            docker compose exec -T "$svc" sh -c \
+              "find /dicom/db -mindepth 1 -delete 2>/dev/null || true"
+          done
+          docker compose restart pacs-server pacs-server-2
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server healthy after cleanup"
+              break
+            fi
+            sleep 2
+          done
+
       - name: First test-store.sh run
         run: docker compose exec -T test-client /tests/test-store.sh
+
+      - name: Wipe PACS storage on the host between runs
+        run: |
+          for svc in pacs-server pacs-server-2; do
+            docker compose exec -T "$svc" sh -c \
+              "find /dicom/db -mindepth 1 -delete 2>/dev/null || true"
+          done
+          docker compose restart pacs-server pacs-server-2
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server healthy after cleanup"
+              break
+            fi
+            sleep 2
+          done
 
       - name: Second test-store.sh run (must also pass)
         run: docker compose exec -T test-client /tests/test-store.sh

@@ -188,84 +188,39 @@ ensure_pacs_data() {
     fi
 }
 
-# ── Wipe PACS storage and reload from scratch ─────────
-# Canonical bootstrap helper for tests that require a clean PACS.
-# Idempotent: safe to call multiple times. Always leaves the PACS empty
-# of test data after the wipe (callers typically follow with storescu).
+# ── Verify PACS is empty (cleanup must happen on the host) ────
+# Verification-only helper. Destructive cleanup of PACS storage must be
+# performed on the host by the caller (e.g. `pacs.sh` or the CI workflow)
+# before this script runs inside the test-client container.
 #
-# The container hosting dcmqrscp is identified by ${pacs_host} which, in
-# the docker-compose setup, doubles as the compose service name. Storage
-# is wiped via `docker compose exec` against that service's STORAGE_DIR,
-# which scopes naturally to the active compose project so parallel
-# stacks do not collide.
+# Rationale: the test-client image does not include the Docker CLI, and
+# its own `/dicom/db` is not the PACS server's storage volume. Any in-
+# container attempt to delete `/dicom/db` would target the wrong path and
+# silently leave PACS data intact. See issue #19.
+#
+# Behavior:
+#   1. Probes the SCP with C-ECHO; returns non-zero if unreachable.
+#   2. Queries the SCP for any remaining studies via C-FIND.
+#   3. Returns non-zero (and logs ERROR) if any studies remain. This makes
+#      the test fail loudly rather than continuing against dirty state.
 #
 # Usage:
-#   ensure_clean_pacs "host" "port" "called_ae" "calling_ae" [service] [storage_dir]
-#
-# Defaults:
-#   service     -> ${pacs_host}
-#   storage_dir -> /dicom/db (matches docker-compose pacs-server config)
+#   ensure_clean_pacs "host" "port" "called_ae" "calling_ae"
 ensure_clean_pacs() {
     local pacs_host="$1"
     local pacs_port="$2"
     local pacs_ae="$3"
     local my_ae="$4"
-    local service="${5:-${pacs_host}}"
-    local storage_dir="${6:-/dicom/db}"
 
-    # Verify the SCP responds before attempting destructive work
+    # Verify the SCP responds before querying study count
     if ! echoscu -aet "${my_ae}" -aec "${pacs_ae}" -to 5 \
             "${pacs_host}" "${pacs_port}" >/dev/null 2>&1; then
         echo "ERROR: ensure_clean_pacs: ${pacs_ae}@${pacs_host}:${pacs_port} not reachable" >&2
         return 1
     fi
 
-    # Detect docker compose binary (v2 plugin preferred, legacy fallback)
-    local dc=""
-    if command -v docker >/dev/null 2>&1; then
-        if docker compose version >/dev/null 2>&1; then
-            dc="docker compose"
-        elif command -v docker-compose >/dev/null 2>&1; then
-            dc="docker-compose"
-        fi
-    fi
-
-    # Resolve the compose service to a container ID under the current
-    # compose project, so we never assume a fixed container_name.
-    local container_id=""
-    if [ -n "${dc}" ]; then
-        container_id=$(${dc} ps -q "${service}" 2>/dev/null | head -n1)
-    fi
-
-    # Wipe the PACS storage directory inside the container.
-    # Two strategies, in order of preference:
-    #   1. docker compose exec/restart (when running on the host with docker compose)
-    #   2. direct rm                   (when this helper is itself running inside the PACS container)
-    if [ -n "${dc}" ] && [ -n "${container_id}" ]; then
-        echo "Wiping PACS storage in service ${service}:${storage_dir}"
-        ${dc} exec -T "${service}" sh -c \
-            "find '${storage_dir}' -mindepth 1 -delete 2>/dev/null || true"
-        # Restart dcmqrscp so the index is re-read from the now-empty dir
-        ${dc} restart "${service}" >/dev/null 2>&1 || true
-        # Wait for the container to come back online
-        local i
-        for i in $(seq 1 30); do
-            if echoscu -aet "${my_ae}" -aec "${pacs_ae}" -to 2 \
-                    "${pacs_host}" "${pacs_port}" >/dev/null 2>&1; then
-                break
-            fi
-            sleep 1
-        done
-    elif [ -d "${storage_dir}" ] && [ -w "${storage_dir}" ]; then
-        echo "Wiping PACS storage at ${storage_dir} (in-container mode)"
-        find "${storage_dir}" -mindepth 1 -delete 2>/dev/null || true
-    else
-        echo "WARNING: ensure_clean_pacs: no docker compose access and ${storage_dir} not writable" >&2
-        echo "         PACS will not be wiped; tests may observe pre-existing data." >&2
-        return 0
-    fi
-
-    # Verify the wipe succeeded by re-querying study count
+    # Query for any remaining studies; the host-side caller is responsible
+    # for wiping PACS storage before this helper runs.
     local check_output remaining
     check_output=$(findscu -aet "${my_ae}" -aec "${pacs_ae}" \
         -S "${pacs_host}" "${pacs_port}" \
@@ -273,9 +228,11 @@ ensure_clean_pacs() {
     remaining=$(echo "${check_output}" | grep -c "StudyInstanceUID" 2>/dev/null || echo "0")
 
     if [ "${remaining}" -gt 0 ]; then
-        echo "WARNING: ensure_clean_pacs: ${remaining} studies remain after wipe" >&2
-    else
-        echo "  ensure_clean_pacs: PACS storage cleared"
+        echo "ERROR: ensure_clean_pacs: ${remaining} studies remain on ${pacs_ae}@${pacs_host}:${pacs_port}" >&2
+        echo "       The host-side runner must wipe PACS storage before invoking this test." >&2
+        return 1
     fi
+
+    echo "  ensure_clean_pacs: ${pacs_ae}@${pacs_host}:${pacs_port} is empty"
     return 0
 }

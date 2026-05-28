@@ -34,13 +34,14 @@ if [ ! -d "${TEST_DATA_DIR}/ct" ] || [ "$(find "${TEST_DATA_DIR}" -name '*.dcm' 
     fi
 fi
 
-# ── Wipe PACS so re-runs start from a known-empty state ──
-# Without this the C-STORE verification step would only check that the
-# study count is >= 3, which is trivially true after the first run; with
-# this, calling test-store.sh twice in a row both pass and exercise the
-# full storescu -> dcmqrscp ingest path each time.
-ensure_clean_pacs "${PACS_HOST}"  "${PACS_PORT}" "${PACS_AE}"  "${MY_AE}"
-ensure_clean_pacs "${PACS2_HOST}" "${PACS_PORT}" "${PACS2_AE}" "${MY_AE}"
+# ── Require both PACS to start empty (verification-only) ─────
+# Destructive cleanup of PACS storage runs on the host before this script
+# is invoked inside test-client (see `pacs.sh` and the test-isolation
+# workflow). Here we only verify the precondition: any leftover studies
+# would let the >= 3 study-count check below pass trivially on the second
+# run and mask regressions in the storescu -> dcmqrscp ingest path.
+ensure_clean_pacs "${PACS_HOST}"  "${PACS_PORT}" "${PACS_AE}"  "${MY_AE}" || exit 1
+ensure_clean_pacs "${PACS2_HOST}" "${PACS_PORT}" "${PACS2_AE}" "${MY_AE}" || exit 1
 
 CT_COUNT=$(find "${TEST_DATA_DIR}/ct" -name "*.dcm" 2>/dev/null | wc -l)
 MR_COUNT=$(find "${TEST_DATA_DIR}/mr" -name "*.dcm" 2>/dev/null | wc -l)
