@@ -140,6 +140,10 @@ services:
     depends_on:
       pacs-server:
         condition: service_healthy
+      pacs-server-2:
+        condition: service_healthy
+      storescp-receiver:
+        condition: service_healthy
 
 networks:
   dicom-net:

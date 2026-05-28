@@ -33,6 +33,7 @@ fi
 
 # ── Service definitions ──────────────────────────
 ALL_SERVICES=(pacs-server pacs-server-2 storescp-receiver test-client)
+SCP_SERVICES=(pacs-server pacs-server-2 storescp-receiver)
 VALID_TESTS=(all echo store find move)
 
 # ── Helper functions ─────────────────────────────
@@ -92,25 +93,34 @@ is_loopback_host() {
     esac
 }
 
-wait_healthy() {
-    local timeout="${1:-90}"
+wait_for_services() {
+    # Wait for the given services to report healthy. Dumps the health status
+    # and recent logs of any service that does not become ready in time.
+    # Usage: wait_for_services <timeout_seconds> <service> [service ...]
+    local timeout="$1"
+    shift
+    local services=("$@")
+
+    if [ "${#services[@]}" -eq 0 ]; then
+        services=("${SCP_SERVICES[@]}")
+    fi
+
     local elapsed=0
     local interval=3
-    info "Waiting for services to be healthy (timeout: ${timeout}s)..."
+    info "Waiting for services to be healthy: ${services[*]} (timeout: ${timeout}s)..."
 
     while [ "${elapsed}" -lt "${timeout}" ]; do
-        local all_healthy=true
-        for svc in pacs-server pacs-server-2 storescp-receiver; do
-            local health
-            health=$(docker inspect --format='{{.State.Health.Status}}' "${svc}" 2>/dev/null || echo "missing")
+        local pending=()
+        local svc health
+        for svc in "${services[@]}"; do
+            health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${svc}" 2>/dev/null || echo "missing")
             if [ "${health}" != "healthy" ]; then
-                all_healthy=false
-                break
+                pending+=("${svc}")
             fi
         done
 
-        if [ "${all_healthy}" = true ]; then
-            ok "All services are healthy"
+        if [ "${#pending[@]}" -eq 0 ]; then
+            ok "All required services are healthy"
             return 0
         fi
 
@@ -118,7 +128,15 @@ wait_healthy() {
         elapsed=$((elapsed + interval))
     done
 
-    warn "Timeout waiting for healthy status after ${timeout}s"
+    err "Timeout waiting for healthy status after ${timeout}s"
+    for svc in "${services[@]}"; do
+        local health
+        health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${svc}" 2>/dev/null || echo "missing")
+        if [ "${health}" != "healthy" ]; then
+            warn "Service ${svc} is not healthy (status: ${health}); recent logs:"
+            ${DC} logs --tail=50 "${svc}" 2>&1 || true
+        fi
+    done
     return 1
 }
 
@@ -165,7 +183,7 @@ cmd_up() {
     info "Building and starting all services..."
     ${DC} up -d --build
 
-    if wait_healthy 90; then
+    if wait_for_services 90 "${SCP_SERVICES[@]}"; then
         print_status_table
     else
         warn "Some services may not be ready yet. Check with: ./pacs.sh status"
@@ -222,6 +240,13 @@ cmd_test() {
     state=$(docker inspect --format='{{.State.Status}}' test-client 2>/dev/null || echo "not found")
     if [ "${state}" != "running" ]; then
         err "test-client container is not running. Start with: ./pacs.sh up"
+        exit 1
+    fi
+
+    # Defense in depth: ensure every SCP the tests rely on is healthy before
+    # invoking the test entry points (issue #20).
+    if ! wait_for_services 60 "${SCP_SERVICES[@]}"; then
+        err "Required SCP services are not healthy; aborting test run."
         exit 1
     fi
 
