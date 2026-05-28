@@ -241,7 +241,28 @@ Then rebuild: `docker compose up -d --build pacs-server`
 ./pacs.sh test find     # Query
 ./pacs.sh test move     # Retrieval
 ./pacs.sh test pixeldata  # PixelData smoke (opt-in, see below)
+./pacs.sh test transfer-syntax  # Uncompressed transfer-syntax matrix
 ```
+
+#### Transfer syntax compatibility
+
+The synthetic data generator emits every instance as Explicit VR Little
+Endian. The `transfer-syntax` suite (`tests/test-transfer-syntax.sh`) takes
+that source instance and uses `dcmconv` to convert it to the three
+uncompressed syntaxes that DCMTK's default Debian package always accepts,
+then verifies `storescu` can negotiate each one against the primary PACS:
+
+| Label            | Transfer Syntax UID    | `dcmconv` flag |
+|------------------|------------------------|----------------|
+| explicit-vr-le   | 1.2.840.10008.1.2.1    | `+te`          |
+| implicit-vr-le   | 1.2.840.10008.1.2      | `+ti`          |
+| explicit-vr-be   | 1.2.840.10008.1.2.2    | `+tb`          |
+
+Compressed syntaxes (JPEG / JPEG-LS / RLE / JPEG2000) require codec
+libraries that are not part of the upstream Debian `dcmtk` package; the
+suite intentionally skips them. To extend coverage once a codec-enabled
+image variant ships, add the matching `dcmconv` flag (`+ej`, `+er`, ...)
+and target UID to the matrix in `tests/test-transfer-syntax.sh`.
 
 ### Test Data
 
