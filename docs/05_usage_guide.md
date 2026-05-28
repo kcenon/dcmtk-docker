@@ -52,8 +52,12 @@ The `up` command automatically:
 4. Displays a status table showing service health, ports, and AE titles
 
 > **Note:** Even without running `./pacs.sh up`, `docker compose` commands work
-> directly — the `env_file` directive in `docker-compose.yml` reads `env.default`
-> as a fallback when `.env` doesn't exist.
+> directly. `docker-compose.yml` does **not** use an `env_file` directive;
+> instead, every variable is referenced as `${VAR:-default}`, so the in-file
+> default takes effect when neither the shell environment nor a `.env` file
+> defines it. `env.default` is a template that `./pacs.sh up` copies to `.env`
+> for customization — it is not consumed by Docker Compose directly. The
+> defaults baked into `docker-compose.yml` mirror the values in `env.default`.
 
 ### Verify the Environment
 
@@ -503,7 +507,8 @@ wait
     ./pacs.sh clean
 ```
 
-Or using `docker compose` directly (no `.env` copy needed thanks to `env_file` fallback):
+Or using `docker compose` directly (no `.env` copy needed because every
+variable in `docker-compose.yml` has a `${VAR:-default}` fallback):
 
 ```yaml
 - name: Run PACS integration tests
