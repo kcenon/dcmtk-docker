@@ -247,6 +247,11 @@ cmd_status() {
 # test-store.sh against a stack that already holds studies from a prior
 # run; the test-client container itself has no Docker CLI and no access
 # to the PACS volumes (see issue #19).
+#
+# The PACS entrypoint re-indexes synthetic test data on every container
+# start unless a .indexed marker exists. After wiping storage we recreate
+# the marker so the restart leaves PACS empty rather than re-populating
+# it from /dicom/testdata. See scripts/entrypoint.sh.
 clean_pacs_storage() {
     local svc storage_dir state cid
     storage_dir="/dicom/db"
@@ -262,8 +267,11 @@ clean_pacs_storage() {
             continue
         fi
         info "Wiping ${svc}:${storage_dir} (host-side cleanup)"
-        ${DC} exec -T "${svc}" sh -c \
-            "find '${storage_dir}' -mindepth 1 -delete 2>/dev/null || true"
+        ${DC} exec -T "${svc}" sh -c "
+            find '${storage_dir}' -mindepth 1 -delete 2>/dev/null || true
+            mkdir -p \"${storage_dir}/\${AE_TITLE}\"
+            touch \"${storage_dir}/\${AE_TITLE}/.indexed\"
+        "
     done
 
     # Restart the PACS services so dcmqrscp re-reads its (now-empty) index.

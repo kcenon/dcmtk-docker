@@ -94,11 +94,19 @@ jobs:
         # check is meaningful. The PACS entrypoint indexes synthetic test
         # data on first boot, so cleanup must run on the host (the
         # test-client image has no Docker CLI). See issue #19.
+        #
+        # The entrypoint re-indexes test data on every container start
+        # unless a .indexed marker exists. After wiping storage we recreate
+        # the marker so the restart leaves PACS empty rather than re-
+        # populating it from /dicom/testdata. See scripts/entrypoint.sh.
         if: matrix.test == 'test-store.sh'
         run: |
           for svc in pacs-server pacs-server-2; do
-            docker compose exec -T "$svc" sh -c \
-              "find /dicom/db -mindepth 1 -delete 2>/dev/null || true"
+            docker compose exec -T "$svc" sh -c '
+              find /dicom/db -mindepth 1 -delete 2>/dev/null || true
+              mkdir -p "/dicom/db/${AE_TITLE}"
+              touch "/dicom/db/${AE_TITLE}/.indexed"
+            '
           done
           docker compose restart pacs-server pacs-server-2
           for i in $(seq 1 60); do
@@ -263,10 +271,18 @@ jobs:
         # so the volumes are dirty even before any storescu. Cleanup must
         # run on the host (the test-client image has no Docker CLI). See
         # issue #19.
+        #
+        # The entrypoint re-indexes test data on every container start
+        # unless a .indexed marker exists. After wiping storage we recreate
+        # the marker so the restart leaves PACS empty rather than re-
+        # populating it from /dicom/testdata. See scripts/entrypoint.sh.
         run: |
           for svc in pacs-server pacs-server-2; do
-            docker compose exec -T "$svc" sh -c \
-              "find /dicom/db -mindepth 1 -delete 2>/dev/null || true"
+            docker compose exec -T "$svc" sh -c '
+              find /dicom/db -mindepth 1 -delete 2>/dev/null || true
+              mkdir -p "/dicom/db/${AE_TITLE}"
+              touch "/dicom/db/${AE_TITLE}/.indexed"
+            '
           done
           docker compose restart pacs-server pacs-server-2
           for i in $(seq 1 60); do
@@ -282,10 +298,15 @@ jobs:
         run: docker compose exec -T test-client /tests/test-store.sh
 
       - name: Wipe PACS storage on the host between runs
+        # Same marker trick as before to keep the second run starting from
+        # an empty PACS. See the comment on the first wipe step.
         run: |
           for svc in pacs-server pacs-server-2; do
-            docker compose exec -T "$svc" sh -c \
-              "find /dicom/db -mindepth 1 -delete 2>/dev/null || true"
+            docker compose exec -T "$svc" sh -c '
+              find /dicom/db -mindepth 1 -delete 2>/dev/null || true
+              mkdir -p "/dicom/db/${AE_TITLE}"
+              touch "/dicom/db/${AE_TITLE}/.indexed"
+            '
           done
           docker compose restart pacs-server pacs-server-2
           for i in $(seq 1 60); do
