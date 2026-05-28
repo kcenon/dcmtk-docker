@@ -13,7 +13,8 @@ PACS_PORT="${PACS_PORT:-11112}"
 PACS_AE="${PACS_AE_TITLE:-DCMTK_PACS}"
 MY_AE="${AE_TITLE:-TEST_SCU}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
-OID_ROOT="${OID_ROOT:-1.2.826.0.1.3680043.8.1055}"
+OID_ROOT="${OID_ROOT:-${DEFAULT_OID_ROOT}}"
+print_verbose "OID_ROOT=${OID_ROOT}"
 
 # ── C-FIND test runner ────────────────────────────────
 # Runs findscu and checks that the number of matching UIDs meets the minimum.

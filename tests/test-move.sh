@@ -20,7 +20,8 @@ MY_AE="${AE_TITLE:-TEST_SCU}"
 STORESCP_HOST="${STORESCP_HOST:-storescp-receiver}"
 STORESCP_AE="${STORESCP_AE_TITLE:-STORE_SCP}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
-OID_ROOT="${OID_ROOT:-1.2.826.0.1.3680043.8.1055}"
+OID_ROOT="${OID_ROOT:-${DEFAULT_OID_ROOT}}"
+print_verbose "OID_ROOT=${OID_ROOT}"
 
 # ── Preamble: verify required SCPs are reachable ──────
 # Both the source PACS and the storescp-receiver destination must be up
