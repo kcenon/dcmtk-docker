@@ -242,6 +242,7 @@ Then rebuild: `docker compose up -d --build pacs-server`
 ./pacs.sh test move     # Retrieval
 ./pacs.sh test pixeldata  # PixelData smoke (opt-in, see below)
 ./pacs.sh test transfer-syntax  # Uncompressed transfer-syntax matrix
+./pacs.sh test load-smoke # Operational load smoke (parallel C-STORE + C-FIND)
 ```
 
 #### Transfer syntax compatibility
@@ -263,6 +264,33 @@ libraries that are not part of the upstream Debian `dcmtk` package; the
 suite intentionally skips them. To extend coverage once a codec-enabled
 image variant ships, add the matching `dcmconv` flag (`+ej`, `+er`, ...)
 and target UID to the matrix in `tests/test-transfer-syntax.sh`.
+
+### Load Smoke Testing
+
+The `load-smoke` suite drives the PACS with parallel `storescu` workers
+and a concurrent `findscu` probe, exercising the `MAX_ASSOCIATIONS`
+ceiling, association cleanup, and mixed store/query behaviour that the
+functional suites do not cover.
+
+```bash
+# Defaults are conservative so the suite stays inside ~1-2 min of CI budget
+./pacs.sh test load-smoke
+
+# Probe a heavier mix (e.g. saturate the default MAX_ASSOCIATIONS=16 ceiling)
+LOAD_SMOKE_PARALLEL=4 LOAD_SMOKE_REPEAT=3 ./pacs.sh test load-smoke
+```
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `LOAD_SMOKE_PARALLEL` | `2` | Number of parallel `storescu` workers |
+| `LOAD_SMOKE_REPEAT` | `2` | Iterations of `storescu` per worker |
+| `LOAD_SMOKE_TIMEOUT` | `60` | Per-association timeout in seconds |
+| `LOAD_SMOKE_FIND_REPS` | `5` | Concurrent `findscu` iterations (0 disables the probe) |
+
+The suite passes when at least half of the parallel workers complete and
+the post-load study count is at or above the pre-load baseline. Failed
+worker logs are emitted to stderr so the offending association can be
+attributed back to its worker.
 
 ### Test Data
 
