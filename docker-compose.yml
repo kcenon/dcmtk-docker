@@ -128,9 +128,15 @@ services:
       - CR_PIXEL_COLS=${CR_PIXEL_COLS:-}
       - TEST_DATA_DIR=/dicom/testdata
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
+      - STORESCP_STORAGE_DIR=/dicom/received
     volumes:
       - ./data:/dicom/testdata
       - ./tests:/tests:ro
+      # Mount the storescp-receiver storage so C-MOVE tests can clean
+      # incoming files between cases and verify the arrived instances
+      # (count + DICOM UID match) instead of relying on movescu exit
+      # codes alone. See issue #33.
+      - received-data:/dicom/received
     networks:
       - dicom-net
     depends_on:
