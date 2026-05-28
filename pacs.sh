@@ -391,6 +391,60 @@ cmd_clean() {
     ok "Cleaned up all Docker resources"
 }
 
+# Remove host-side generated DICOM data while preserving source fixtures.
+# The test-client bind mounts ./data into /dicom/testdata and writes synthetic
+# CT/MR/CR studies under data/ct, data/mr, data/cr (see issue #37). The
+# data/dicom-templates directory is checked into git and must never be touched.
+#
+# Usage: ./pacs.sh clean-data [--dry-run]
+cmd_clean_data() {
+    local dry_run=false
+    if [ "${1:-}" = "--dry-run" ] || [ "${1:-}" = "-n" ]; then
+        dry_run=true
+    fi
+
+    # Resolve the data directory to an absolute path and refuse to act if it
+    # is missing — guards against running from an unexpected CWD.
+    local data_root="${SCRIPT_DIR}/data"
+    if [ ! -d "${data_root}" ]; then
+        err "data directory not found at ${data_root}"
+        exit 1
+    fi
+
+    # Narrow allowlist of generated subdirectories. Anything not listed here
+    # (notably data/dicom-templates) is left untouched.
+    local generated_dirs=(ct mr cr dicom-output received)
+
+    local removed=0
+    local sub abs
+    for sub in "${generated_dirs[@]}"; do
+        abs="${data_root}/${sub}"
+        if [ ! -e "${abs}" ]; then
+            continue
+        fi
+        # Safety: refuse to delete anything that is not under data_root.
+        case "${abs}" in
+            "${data_root}/"*) ;;
+            *) err "Refusing to remove ${abs}: outside ${data_root}"; exit 1 ;;
+        esac
+        if [ "${dry_run}" = true ]; then
+            info "[dry-run] would remove ${abs}"
+        else
+            info "Removing ${abs}"
+            rm -rf -- "${abs}"
+        fi
+        removed=$((removed + 1))
+    done
+
+    if [ "${removed}" -eq 0 ]; then
+        ok "No generated data to remove"
+    elif [ "${dry_run}" = true ]; then
+        ok "Dry run complete (${removed} path(s) would be removed)"
+    else
+        ok "Removed ${removed} generated data path(s); source fixtures preserved"
+    fi
+}
+
 cmd_echo() {
     local host="${1:-localhost}"
     local port="${2:-11112}"
@@ -479,6 +533,10 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_GREEN}shell${C_RESET}             Open bash in the test-client container
   ${C_GREEN}reset${C_RESET}             Stop, wipe volumes, and restart fresh
   ${C_GREEN}clean${C_RESET}             Remove all containers, images, and volumes
+  ${C_GREEN}clean-data${C_RESET} [--dry-run]
+                    Remove host-side generated DICOM data (data/ct, data/mr,
+                    data/cr, data/dicom-output, data/received); preserves
+                    data/dicom-templates source fixtures
   ${C_GREEN}echo${C_RESET} [host] [port] [called-ae] [calling-ae]
                     Quick C-ECHO verification
   ${C_GREEN}help${C_RESET}              Show this help message
@@ -513,6 +571,7 @@ case "${command}" in
     shell)   cmd_shell "$@" ;;
     reset)   cmd_reset "$@" ;;
     clean)   cmd_clean "$@" ;;
+    clean-data) cmd_clean_data "$@" ;;
     echo)    cmd_echo "$@" ;;
     help|-h|--help) cmd_help ;;
     *)

@@ -255,12 +255,28 @@ Synthetic DICOM files are generated automatically at first startup:
 To add custom DICOM files, place them in the `data/` directory.
 They will be available in the test-client at `/dicom/testdata/`.
 
-To regenerate test data, remove existing files and restart:
+#### Source fixtures vs generated artifacts
+
+The `data/` directory mixes two kinds of content. Only the source fixtures are
+tracked in git; generated artifacts are ignored via `.gitignore` and can be
+wiped safely.
+
+| Path | Kind | Tracked | Notes |
+|------|------|---------|-------|
+| `data/dicom-templates/` | Source fixture | Yes | `*.dump` templates consumed by the generator; never delete |
+| `data/ct/`, `data/mr/`, `data/cr/` | Generated | No | Synthetic DICOM written on first `./pacs.sh up` |
+| `data/dicom-output/`, `data/received/` | Generated | No | Test runtime artifacts |
+
+To regenerate test data, remove the generated directories and restart:
 
 ```bash
-rm -rf data/ct data/mr data/cr
+./pacs.sh clean-data            # remove only generated artifacts
 docker compose restart test-client
 ```
+
+`./pacs.sh clean-data --dry-run` prints the paths it would remove without
+touching the filesystem. Source fixtures in `data/dicom-templates/` are
+always preserved.
 
 #### Synthetic PixelData (optional)
 
