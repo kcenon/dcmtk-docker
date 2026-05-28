@@ -240,6 +240,7 @@ Then rebuild: `docker compose up -d --build pacs-server`
 ./pacs.sh test store    # Image archival
 ./pacs.sh test find     # Query
 ./pacs.sh test move     # Retrieval
+./pacs.sh test pixeldata  # PixelData smoke (opt-in, see below)
 ```
 
 ### Test Data
@@ -323,6 +324,33 @@ docker compose exec test-client dcmdump /dicom/testdata/ct/ct_pat001_1.dcm | gre
 
 A smoke test that runs `dcm2pnm` against a generated file is included as
 `tests/test-pixeldata.sh` (auto-skipped when `GENERATE_PIXEL_DATA` is unset).
+Run it explicitly through the `pacs.sh` CLI once test data has been generated
+with PixelData embedded:
+
+```bash
+# Wipe stale data, regenerate with conservative profile (default), run smoke test
+rm -rf data/ct data/mr data/cr
+GENERATE_PIXEL_DATA=true docker compose up -d --force-recreate pacs-server test-client
+GENERATE_PIXEL_DATA=true ./pacs.sh test pixeldata
+
+# Same with the realistic profile (larger frames, higher memory/CPU)
+rm -rf data/ct data/mr data/cr
+PIXEL_DATA_PROFILE=realistic GENERATE_PIXEL_DATA=true \
+    docker compose up -d --force-recreate pacs-server test-client
+GENERATE_PIXEL_DATA=true PIXEL_DATA_PROFILE=realistic \
+    ./pacs.sh test pixeldata
+```
+
+When `GENERATE_PIXEL_DATA` is left unset, `./pacs.sh test pixeldata` runs the
+script which prints a `SKIP` line and exits 0 — useful for confirming the CLI
+wiring without regenerating any data. CI currently exercises the conservative
+profile only; the realistic profile remains an opt-in local check.
+
+Re-generating PixelData requires wiping the per-modality `data/ct`, `data/mr`,
+and `data/cr` directories so the test-client recreates them on next start. The
+PACS storage volume also caches a `<storage>/<AE_TITLE>/.indexed` marker (see
+note below) — delete it whenever the underlying instances change so the server
+re-indexes them.
 
 > **Note:** The `pacs-server` indexes test DICOM files into its database on
 > first startup and writes a marker file at `<storage>/<AE_TITLE>/.indexed`
