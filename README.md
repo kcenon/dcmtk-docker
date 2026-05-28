@@ -70,7 +70,7 @@ A unified CLI script wraps all common operations:
 | `./pacs.sh shell` | Interactive bash into test-client container |
 | `./pacs.sh reset` | Wipe volumes and restart fresh |
 | `./pacs.sh clean` | Remove all containers, images, and volumes |
-| `./pacs.sh echo [host] [port]` | Quick C-ECHO connectivity check |
+| `./pacs.sh echo [host] [port] [called-ae] [calling-ae]` | Quick C-ECHO connectivity check |
 | `./pacs.sh help` | Show usage with examples |
 
 All `docker compose` commands still work directly if you prefer.
@@ -104,6 +104,9 @@ docker compose down -v
 ```bash
 # Quick check via pacs.sh (auto-detects host/container)
 ./pacs.sh echo localhost 11112
+
+# Check secondary PACS by overriding the Called AE Title
+./pacs.sh echo localhost 11113 DCMTK_PAC2
 
 # From test-client container
 docker compose exec test-client \
@@ -431,6 +434,7 @@ dcmtk_docker/
 ├── scripts/
 │   ├── entrypoint.sh                   # Role-based startup dispatcher
 │   ├── generate-test-data.sh           # Synthetic DICOM generation
+│   ├── pixel-data-profile.sh           # Shared PixelData profile defaults
 │   └── wait-for-pacs.sh               # Readiness polling
 ├── data/
 │   └── dicom-templates/                # dump2dcm reference templates
@@ -442,13 +446,16 @@ dcmtk_docker/
 │   ├── test-store.sh                   # C-STORE tests
 │   ├── test-find.sh                    # C-FIND tests
 │   ├── test-move.sh                    # C-MOVE tests
+│   ├── test-pixeldata.sh               # PixelData smoke tests
+│   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
 └── docs/
     ├── 01_research_dcmtk_dicom.md
     ├── 02_research_docker_approaches.md
     ├── 03_architecture_design.md
     ├── 04_work_plan.md
-    └── 05_usage_guide.md
+    ├── 05_usage_guide.md
+    └── 06_dcmqridx_behavior.md
 ```
 
 ## Troubleshooting
@@ -469,8 +476,8 @@ dcmtk_docker/
 # Check PACS logs
 ./pacs.sh logs pacs-server
 
-# Test TCP connectivity
-docker compose exec test-client nc -zv pacs-server 11112
+# Test DICOM connectivity
+docker compose exec test-client echoscu -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112
 ```
 
 ### C-MOVE fails / "No matching destination"
@@ -478,7 +485,7 @@ docker compose exec test-client nc -zv pacs-server 11112
 C-MOVE requires the destination AE to be registered in the PACS HostTable.
 
 1. **Check the HostTable**: `docker compose exec pacs-server cat /tmp/dcmqrscp.cfg`
-2. **Verify the destination is reachable**: `docker compose exec test-client echoscu storescp-receiver 11112`
+2. **Verify the destination is reachable**: `docker compose exec test-client echoscu -aet TEST_SCU -aec STORE_SCP storescp-receiver 11112`
 3. **Destination AE must match**: The `-aem` value in `movescu` must match a HostTable entry
 
 ### "No such SOP Class" / Transfer syntax errors

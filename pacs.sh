@@ -48,6 +48,50 @@ ensure_env() {
     fi
 }
 
+read_env_value() {
+    local key="$1"
+    local default="$2"
+    local value="${!key:-}"
+
+    if [ -n "${value}" ]; then
+        printf '%s' "${value}"
+        return 0
+    fi
+
+    local file
+    for file in .env env.default; do
+        if [ -f "${file}" ]; then
+            value=$(awk -F= -v key="${key}" '
+                { sub(/\r$/, "") }
+                $0 ~ /^[[:space:]]*#/ { next }
+                {
+                    lhs = $1
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
+                }
+                lhs == key {
+                    sub(/^[^=]*=/, "")
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+                    print
+                    exit
+                }
+            ' "${file}")
+            if [ -n "${value}" ]; then
+                printf '%s' "${value}"
+                return 0
+            fi
+        fi
+    done
+
+    printf '%s' "${default}"
+}
+
+is_loopback_host() {
+    case "$1" in
+        localhost|127.0.0.1|::1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 wait_healthy() {
     local timeout="${1:-90}"
     local elapsed=0
@@ -227,11 +271,36 @@ cmd_clean() {
 cmd_echo() {
     local host="${1:-localhost}"
     local port="${2:-11112}"
+    local called_ae="${3:-}"
+    local calling_ae="${4:-}"
+    local pacs1_ae pacs2_ae storescp_ae
+    local pacs1_host_port pacs2_host_port storescp_host_port internal_port
+
+    pacs1_ae=$(read_env_value "PACS1_AE_TITLE" "DCMTK_PACS")
+    pacs2_ae=$(read_env_value "PACS2_AE_TITLE" "DCMTK_PAC2")
+    storescp_ae=$(read_env_value "STORESCP_AE_TITLE" "STORE_SCP")
+    pacs1_host_port=$(read_env_value "PACS1_HOST_PORT" "11112")
+    pacs2_host_port=$(read_env_value "PACS2_HOST_PORT" "11113")
+    storescp_host_port=$(read_env_value "STORESCP_HOST_PORT" "11114")
+    internal_port=$(read_env_value "DICOM_PORT" "11112")
+
+    if [ -z "${called_ae}" ]; then
+        if is_loopback_host "${host}" && [ "${port}" = "${pacs2_host_port}" ]; then
+            called_ae="${pacs2_ae}"
+        elif is_loopback_host "${host}" && [ "${port}" = "${storescp_host_port}" ]; then
+            called_ae="${storescp_ae}"
+        else
+            called_ae="${pacs1_ae}"
+        fi
+    fi
+    if [ -z "${calling_ae}" ]; then
+        calling_ae=$(read_env_value "TEST_SCU_AE_TITLE" "TEST_SCU")
+    fi
 
     # Try host-side echoscu first
     if command -v echoscu &>/dev/null; then
-        info "C-ECHO to ${host}:${port} (host)"
-        if echoscu "${host}" "${port}"; then
+        info "C-ECHO to ${host}:${port} (host, called AE: ${called_ae}, calling AE: ${calling_ae})"
+        if echoscu -aet "${calling_ae}" -aec "${called_ae}" "${host}" "${port}"; then
             ok "C-ECHO succeeded"
         else
             err "C-ECHO failed"
@@ -246,8 +315,18 @@ cmd_echo() {
             exit 1
         fi
 
-        info "C-ECHO to ${host}:${port} (via test-client container)"
-        if ${DC} exec -T test-client echoscu "${host}" "${port}"; then
+        local target_host="${host}"
+        local target_port="${port}"
+        if is_loopback_host "${host}"; then
+            case "${port}" in
+                "${pacs1_host_port}") target_host="pacs-server"; target_port="${internal_port}" ;;
+                "${pacs2_host_port}") target_host="pacs-server-2"; target_port="${internal_port}" ;;
+                "${storescp_host_port}") target_host="storescp-receiver"; target_port="${internal_port}" ;;
+            esac
+        fi
+
+        info "C-ECHO to ${target_host}:${target_port} (via test-client container, called AE: ${called_ae}, calling AE: ${calling_ae})"
+        if ${DC} exec -T test-client echoscu -aet "${calling_ae}" -aec "${called_ae}" "${target_host}" "${target_port}"; then
             ok "C-ECHO succeeded"
         else
             err "C-ECHO failed"
@@ -272,7 +351,8 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_GREEN}shell${C_RESET}             Open bash in the test-client container
   ${C_GREEN}reset${C_RESET}             Stop, wipe volumes, and restart fresh
   ${C_GREEN}clean${C_RESET}             Remove all containers, images, and volumes
-  ${C_GREEN}echo${C_RESET} [host] [port] Quick C-ECHO verification
+  ${C_GREEN}echo${C_RESET} [host] [port] [called-ae] [calling-ae]
+                    Quick C-ECHO verification
   ${C_GREEN}help${C_RESET}              Show this help message
 
 ${C_BOLD}Examples:${C_RESET}
@@ -280,7 +360,8 @@ ${C_BOLD}Examples:${C_RESET}
   ./pacs.sh test                  # Run all tests
   ./pacs.sh test echo             # Run only C-ECHO tests
   ./pacs.sh logs pacs-server      # Tail primary PACS logs
-  ./pacs.sh echo localhost 11112  # Quick connectivity check
+  ./pacs.sh echo localhost 11112             # Primary PACS C-ECHO
+  ./pacs.sh echo localhost 11113 DCMTK_PAC2  # Secondary PACS C-ECHO
   ./pacs.sh reset                 # Fresh restart with clean data
 
 ${C_BOLD}Services:${C_RESET}
