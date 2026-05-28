@@ -1,0 +1,32 @@
+# Opt-in compose override that swaps the dcmqrscp config templates to the
+# restricted (AE Title whitelist) profile.
+#
+# Default mode (test): docker-compose.yml ships templates that set the
+# AETable Peers field to "ANY", which allows any Calling AE Title to
+# associate. That is intentional for ergonomic local testing.
+#
+# Restricted mode: this override re-points CONFIG_TEMPLATE for both PACS
+# servers at the *-restricted.cfg.template variants, where Peers uses the
+# HostTable "all_peers" whitelist. dcmqrscp will reject any Calling AE
+# Title that is not enumerated under "all_peers" (test_client, store_scp,
+# and the sibling PACS).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d
+#
+# This file deliberately overrides ONLY the CONFIG_TEMPLATE env var. All
+# other service settings (ports, volumes, healthcheck, depends_on) are
+# inherited from docker-compose.yml, so the restricted profile remains a
+# pure opt-in swap with no other behavioral drift.
+#
+# See README "Restricted AE whitelist profile" and config/
+# dcmqrscp-{primary,secondary}-restricted.cfg.template for details.
+
+services:
+  pacs-server:
+    environment:
+      - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary-restricted.cfg.template
+
+  pacs-server-2:
+    environment:
+      - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-secondary-restricted.cfg.template
