@@ -34,7 +34,7 @@ fi
 # ── Service definitions ──────────────────────────
 ALL_SERVICES=(pacs-server pacs-server-2 storescp-receiver test-client)
 SCP_SERVICES=(pacs-server pacs-server-2 storescp-receiver)
-VALID_TESTS=(all echo store find move)
+VALID_TESTS=(all echo store find move pixeldata)
 
 # ── Helper functions ─────────────────────────────
 info()  { printf "${C_CYAN}>>>${C_RESET} %s\n" "$*"; }
