@@ -193,7 +193,14 @@ cmd_status() {
 }
 
 cmd_test() {
-    local suite="${1:-all}"
+    # If the first arg looks like an option (starts with '-'), treat the suite
+    # as the default 'all' and forward every arg to the test script. Otherwise
+    # consume exactly one positional arg as the suite name.
+    local suite="all"
+    if [ "$#" -gt 0 ] && [ "${1#-}" = "$1" ]; then
+        suite="$1"
+        shift
+    fi
 
     # Validate suite name
     local valid=false
@@ -225,14 +232,19 @@ cmd_test() {
         script="/tests/test-${suite}.sh"
     fi
 
-    shift 2>/dev/null || true
     info "Running test suite: ${suite}"
     ${DC} exec -T test-client bash "${script}" "$@"
 }
 
 cmd_logs() {
-    local service="${1:-}"
-    shift 2>/dev/null || true
+    # Only consume the first arg as a service name when it doesn't start with
+    # '-'. This preserves docker compose log options such as --tail, --since,
+    # and --timestamps when no service is specified.
+    local service=""
+    if [ "$#" -gt 0 ] && [ "${1#-}" = "$1" ]; then
+        service="$1"
+        shift
+    fi
 
     if [ -n "${service}" ]; then
         ${DC} logs -f "${service}" "$@"
