@@ -116,6 +116,7 @@ start_storescp() {
         --output-directory "${STORAGE_DIR}" \
         --aetitle "${AE_TITLE}" \
         --sort-on-study-uid prefix \
+        --filename-extension .dcm \
         "${DICOM_PORT}"
 }
 
