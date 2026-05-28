@@ -34,7 +34,7 @@ fi
 # ── Service definitions ──────────────────────────
 ALL_SERVICES=(pacs-server pacs-server-2 storescp-receiver test-client)
 SCP_SERVICES=(pacs-server pacs-server-2 storescp-receiver)
-VALID_TESTS=(all echo store find move pixeldata transfer-syntax)
+VALID_TESTS=(all echo store find move pixeldata transfer-syntax load-smoke)
 
 # ── Helper functions ─────────────────────────────
 info()  { printf "${C_CYAN}>>>${C_RESET} %s\n" "$*"; }
@@ -528,7 +528,7 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_GREEN}up${C_RESET}                Build and start all services
   ${C_GREEN}down${C_RESET}              Stop all services
   ${C_GREEN}status${C_RESET}            Show service health, ports, and AE titles
-  ${C_GREEN}test${C_RESET} [suite]      Run tests (all, echo, store, find, move, transfer-syntax)
+  ${C_GREEN}test${C_RESET} [suite]      Run tests (all, echo, store, find, move, pixeldata, transfer-syntax, load-smoke)
   ${C_GREEN}logs${C_RESET} [service]    Tail logs (all or specific service)
   ${C_GREEN}shell${C_RESET}             Open bash in the test-client container
   ${C_GREEN}reset${C_RESET}             Stop, wipe volumes, and restart fresh
