@@ -18,8 +18,12 @@ Start a complete DICOM network with a single command.
 
 All DICOM operations (C-ECHO, C-STORE, C-FIND, C-MOVE) are tested automatically.
 
-> **Note:** The project works out of the box — `env.default` is used as fallback when
-> `.env` doesn't exist. Copy to `.env` only if you need custom values: `cp env.default .env`
+> **Note:** The project works out of the box. `docker-compose.yml` uses
+> `${VAR:-default}` interpolation, so every variable has a built-in fallback
+> even when `.env` is absent. `env.default` is a template that `./pacs.sh up`
+> copies to `.env` for customization; it is not read by Docker Compose
+> directly. Copy it to `.env` only if you need custom values:
+> `cp env.default .env`
 
 ## Architecture
 
