@@ -231,7 +231,7 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 | Host Port | 11112 |
 | Services | C-ECHO, C-STORE, C-FIND, C-MOVE |
 | Storage | `pacs-data` named volume |
-| Health Check | `echoscu localhost 11112` |
+| Health Check | `echoscu -aec $AE_TITLE localhost 11112` |
 
 #### pacs-server-2 (Secondary PACS)
 
@@ -243,7 +243,7 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 | Host Port | 11113 |
 | Services | C-ECHO, C-STORE, C-FIND, C-MOVE |
 | Storage | `pacs2-data` named volume |
-| Health Check | `echoscu localhost 11112` |
+| Health Check | `echoscu -aec $AE_TITLE localhost 11112` |
 
 Note: AE Title is `DCMTK_PAC2` (not `DCMTK_PACS2`) because DICOM AE Titles
 have a 16-character maximum limit.
@@ -258,7 +258,7 @@ have a 16-character maximum limit.
 | Host Port | 11114 |
 | Services | C-ECHO (implicit), C-STORE |
 | Storage | `received-data` named volume |
-| Health Check | TCP check on port 11112 |
+| Health Check | `echoscu -aet HEALTHCHECK -aec $AE_TITLE localhost 11112` |
 
 #### test-client (SCU Tools)
 
@@ -458,24 +458,25 @@ All tunable parameters are exposed as environment variables with sensible defaul
 |----------|---------|-------------|
 | `GENERATE_TEST_DATA` | `true` | Generate synthetic DICOM data on startup |
 | `TEST_DATA_DIR` | `/dicom/testdata` | Output directory for generated data |
-| `OID_ROOT` | `1.2.826.0.1.3680043.8.1055` | Private OID root for test UIDs |
+| `OID_ROOT` | `1.2.826.0.1.3680043.8.499` | Private OID root for test UIDs |
 
-### .env File
+### Environment Defaults
 
-The `.env` file provides defaults for all Docker Compose variables:
+The `env.default` file provides defaults for all Docker Compose variables.
+Copy it to `.env` only when local overrides are needed:
 
 ```env
 # PACS Server 1
 PACS1_AE_TITLE=DCMTK_PACS
-PACS1_PORT=11112
+PACS1_HOST_PORT=11112
 
 # PACS Server 2
 PACS2_AE_TITLE=DCMTK_PAC2
-PACS2_PORT=11113
+PACS2_HOST_PORT=11113
 
 # Store SCP Receiver
 STORESCP_AE_TITLE=STORE_SCP
-STORESCP_PORT=11114
+STORESCP_HOST_PORT=11114
 
 # Test Client
 TEST_SCU_AE_TITLE=TEST_SCU
@@ -487,13 +488,13 @@ LOG_LEVEL=info
 GENERATE_TEST_DATA=true
 ```
 
-### dcmqrscp Configuration Template
+### dcmqrscp Configuration Templates
 
-The `dcmqrscp.cfg.template` file uses shell variable placeholders processed by
-`envsubst` or `sed` at container startup:
+The `dcmqrscp-primary.cfg.template` and `dcmqrscp-secondary.cfg.template` files
+use shell variable placeholders processed by `envsubst` at container startup:
 
 ```
-# dcmqrscp.cfg — Generated from template
+# dcmqrscp.cfg - Generated from template
 NetworkTCPPort  = ${DICOM_PORT}
 MaxPDUSize      = ${MAX_PDU_SIZE}
 MaxAssociations = ${MAX_ASSOCIATIONS}
@@ -517,9 +518,9 @@ AETable END
 The entrypoint script processes the template before starting dcmqrscp:
 
 ```bash
-envsubst < /etc/dcmtk/dcmqrscp.cfg.template > /tmp/dcmqrscp.cfg
+envsubst < "${CONFIG_TEMPLATE}" > /tmp/dcmqrscp.cfg
 mkdir -p "${STORAGE_DIR}/${AE_TITLE}"
-exec dcmqrscp -v -c /tmp/dcmqrscp.cfg "$DICOM_PORT"
+exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" -c /tmp/dcmqrscp.cfg "$DICOM_PORT"
 ```
 
 ---
@@ -546,13 +547,13 @@ No external datasets are downloaded — everything is self-contained.
 All test UIDs use a private OID root to prevent collision with real clinical data:
 
 ```
-Root:   1.2.826.0.1.3680043.8.1055
+Root:   1.2.826.0.1.3680043.8.499
 Format: {root}.{patient}.{study}.{series}.{instance}
 
 Examples:
-  Study:    1.2.826.0.1.3680043.8.1055.1.1          (patient 1, study 1)
-  Series:   1.2.826.0.1.3680043.8.1055.1.1.1        (patient 1, study 1, series 1)
-  Instance: 1.2.826.0.1.3680043.8.1055.1.1.1.1      (... instance 1)
+  Study:    1.2.826.0.1.3680043.8.499.1.1          (patient 1, study 1)
+  Series:   1.2.826.0.1.3680043.8.499.1.1.1        (patient 1, study 1, series 1)
+  Instance: 1.2.826.0.1.3680043.8.499.1.1.1.1      (... instance 1)
 ```
 
 ### Generation Flow
@@ -564,9 +565,11 @@ Container Start
     │       │
     │       ├── Run generate-test-data.sh
     │       │       │
-    │       │       ├── Create dump files from templates
+    │       │       ├── Create dump files from attributes
     │       │       ├── dump2dcm → .dcm files in /dicom/testdata/
-    │       │       └── storescu → send to local dcmqrscp
+    │       │       └── optional PixelData from profile defaults
+    │       │
+    │       ├── dcmqridx → register .dcm files in the PACS index
     │       │
     │       └── Start dcmqrscp
     │
@@ -596,17 +599,19 @@ dcmtk_docker/
 ├── Dockerfile                        # Single image: debian:bookworm-slim + DCMTK 3.6.7
 ├── docker-compose.yml                # 4 services: pacs-server, pacs-server-2,
 │                                     #   storescp-receiver, test-client
-├── .env                              # Default environment variables
+├── env.default                       # Default environment values (copy to .env)
 ├── .dockerignore                     # Exclude docs, .git, etc. from build context
 ├── README.md                         # Usage guide, quick start, examples
 │
 ├── config/                           # Configuration files (bind-mounted read-only)
-│   ├── dcmqrscp.cfg.template        # dcmqrscp config with variable placeholders
-│   └── dcmqrscp-pacs2.cfg.template  # Config template for secondary PACS
+│   ├── dcmqrscp-primary.cfg.template   # Primary PACS config template
+│   ├── dcmqrscp-secondary.cfg.template # Secondary PACS config template
+│   └── dcmqrscp-production.cfg.example # Production-safe whitelist example
 │
 ├── scripts/                          # Container scripts (copied into image)
 │   ├── entrypoint.sh                # Role-based startup dispatcher
 │   ├── generate-test-data.sh        # Synthetic DICOM file generation
+│   ├── pixel-data-profile.sh        # Shared PixelData profile defaults
 │   └── wait-for-pacs.sh             # Readiness polling script
 │
 ├── data/                             # Test data (bind-mounted into test-client)
@@ -620,13 +625,17 @@ dcmtk_docker/
 │   ├── test-store.sh                # C-STORE archival test
 │   ├── test-find.sh                 # C-FIND query test
 │   ├── test-move.sh                 # C-MOVE retrieval test
+│   ├── test-pixeldata.sh            # PixelData smoke test
+│   ├── test-helpers.sh              # Shared test helpers
 │   └── test-all.sh                  # Run all tests in sequence
 │
 └── docs/                             # Documentation (not in Docker image)
     ├── 01_research_dcmtk_dicom.md   # DCMTK & DICOM protocol research
     ├── 02_research_docker_approaches.md  # Docker approaches research
     ├── 03_architecture_design.md    # This document
-    └── 04_work_plan.md              # Implementation work plan
+    ├── 04_work_plan.md              # Implementation work plan
+    ├── 05_usage_guide.md            # Usage guide
+    └── 06_dcmqridx_behavior.md      # dcmqridx indexing behavior
 ```
 
 ### File Purposes
@@ -635,11 +644,13 @@ dcmtk_docker/
 |------|---------|
 | `Dockerfile` | Builds the unified DCMTK image with all tools and scripts |
 | `docker-compose.yml` | Defines 4 services, network, and volumes |
-| `.env` | Default values for all configurable parameters |
+| `env.default` | Default values for all configurable parameters |
 | `.dockerignore` | Keeps build context small (excludes docs, .git, data) |
-| `config/dcmqrscp.cfg.template` | dcmqrscp configuration with `envsubst` variables |
+| `config/dcmqrscp-primary.cfg.template` | Primary dcmqrscp configuration with `envsubst` variables |
+| `config/dcmqrscp-secondary.cfg.template` | Secondary dcmqrscp configuration with `envsubst` variables |
 | `scripts/entrypoint.sh` | Reads `ROLE` env var, processes config templates, starts service |
 | `scripts/generate-test-data.sh` | Creates synthetic DICOM files from templates using `dump2dcm` |
+| `scripts/pixel-data-profile.sh` | Resolves shared PixelData profile dimension defaults |
 | `scripts/wait-for-pacs.sh` | Polls a PACS with `echoscu` until it responds (used in depends_on) |
 | `data/dicom-templates/*.dump` | dump2dcm input templates for CT, MR, CR modalities |
 | `tests/test-*.sh` | Individual DICOM operation test scripts |

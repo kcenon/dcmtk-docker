@@ -24,6 +24,19 @@ if [ "${GENERATE_PIXEL_DATA}" != "true" ]; then
     exit 0
 fi
 
+if [ -f /usr/local/bin/pixel-data-profile.sh ]; then
+    # shellcheck source=/usr/local/bin/pixel-data-profile.sh
+    source /usr/local/bin/pixel-data-profile.sh
+elif [ -f "${SCRIPT_DIR}/../scripts/pixel-data-profile.sh" ]; then
+    # shellcheck source=../scripts/pixel-data-profile.sh
+    source "${SCRIPT_DIR}/../scripts/pixel-data-profile.sh"
+else
+    echo "ERROR: pixel-data-profile.sh not found" >&2
+    exit 1
+fi
+
+resolve_pixel_data_profile_defaults
+
 # ── Ensure data is present ────────────────────────────
 if [ ! -d "${TEST_DATA_DIR}" ] || \
    [ "$(find "${TEST_DATA_DIR}" -name '*.dcm' 2>/dev/null | wc -l)" -eq 0 ]; then
@@ -326,13 +339,13 @@ assert_ct_rescale() {
 #                                 (conservative profile defaults).
 # Each cell honors the matching {CT,MR,CR}_PIXEL_ROWS/_COLS env override so
 # this test stays aligned when the operator overrides individual modalities.
-# Note: PIXEL_DATA_PROFILE=realistic still requires the operator to also set
-# the per-modality dimension env vars for this test to track the new values.
+# Dimension defaults are resolved by scripts/pixel-data-profile.sh, the same
+# helper used by scripts/generate-test-data.sh.
 # Format: rows cols bits_stored pix_rep photometric
 declare -A PIXEL_EXPECTED=(
-    [ct]="${CT_PIXEL_ROWS:-128} ${CT_PIXEL_COLS:-128} 16 1 MONOCHROME2"
-    [mr]="${MR_PIXEL_ROWS:-128} ${MR_PIXEL_COLS:-128} 12 0 MONOCHROME2"
-    [cr]="${CR_PIXEL_ROWS:-224} ${CR_PIXEL_COLS:-224} 14 0 MONOCHROME2"
+    [ct]="${CT_PIXEL_ROWS} ${CT_PIXEL_COLS} 16 1 MONOCHROME2"
+    [mr]="${MR_PIXEL_ROWS} ${MR_PIXEL_COLS} 12 0 MONOCHROME2"
+    [cr]="${CR_PIXEL_ROWS} ${CR_PIXEL_COLS} 14 0 MONOCHROME2"
 )
 
 # ── Tests ─────────────────────────────────────────────

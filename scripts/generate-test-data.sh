@@ -11,35 +11,19 @@ OUTPUT_DIR="${1:-${TEST_DATA_DIR:-/dicom/testdata}}"
 OID_ROOT="${OID_ROOT:-1.2.826.0.1.3680043.8.499}"
 GENERATE_PIXEL_DATA="${GENERATE_PIXEL_DATA:-false}"
 
-# PixelData profile selects per-modality default dimensions. Modality-specific
-# overrides (e.g. CT_PIXEL_ROWS) win over the profile default.
-PIXEL_DATA_PROFILE="${PIXEL_DATA_PROFILE:-conservative}"
-case "${PIXEL_DATA_PROFILE}" in
-    realistic)
-        DEFAULT_CT_ROWS=512;  DEFAULT_CT_COLS=512
-        DEFAULT_MR_ROWS=256;  DEFAULT_MR_COLS=256
-        DEFAULT_CR_ROWS=1024; DEFAULT_CR_COLS=1024
-        ;;
-    conservative)
-        DEFAULT_CT_ROWS=128;  DEFAULT_CT_COLS=128
-        DEFAULT_MR_ROWS=128;  DEFAULT_MR_COLS=128
-        DEFAULT_CR_ROWS=224;  DEFAULT_CR_COLS=224
-        ;;
-    *)
-        echo "[generate-test-data] WARNING: unknown PIXEL_DATA_PROFILE='${PIXEL_DATA_PROFILE}', falling back to conservative" >&2
-        DEFAULT_CT_ROWS=128;  DEFAULT_CT_COLS=128
-        DEFAULT_MR_ROWS=128;  DEFAULT_MR_COLS=128
-        DEFAULT_CR_ROWS=224;  DEFAULT_CR_COLS=224
-        PIXEL_DATA_PROFILE="conservative"
-        ;;
-esac
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/pixel-data-profile.sh" ]; then
+    # shellcheck source=scripts/pixel-data-profile.sh
+    source "${SCRIPT_DIR}/pixel-data-profile.sh"
+elif [ -f /usr/local/bin/pixel-data-profile.sh ]; then
+    # shellcheck source=/usr/local/bin/pixel-data-profile.sh
+    source /usr/local/bin/pixel-data-profile.sh
+else
+    echo "[generate-test-data] ERROR: pixel-data-profile.sh not found" >&2
+    exit 1
+fi
 
-CT_PIXEL_ROWS="${CT_PIXEL_ROWS:-${DEFAULT_CT_ROWS}}"
-CT_PIXEL_COLS="${CT_PIXEL_COLS:-${DEFAULT_CT_COLS}}"
-MR_PIXEL_ROWS="${MR_PIXEL_ROWS:-${DEFAULT_MR_ROWS}}"
-MR_PIXEL_COLS="${MR_PIXEL_COLS:-${DEFAULT_MR_COLS}}"
-CR_PIXEL_ROWS="${CR_PIXEL_ROWS:-${DEFAULT_CR_ROWS}}"
-CR_PIXEL_COLS="${CR_PIXEL_COLS:-${DEFAULT_CR_COLS}}"
+resolve_pixel_data_profile_defaults
 
 # The legacy uniform PIXEL_DATA_ROWS / PIXEL_DATA_COLS introduced by PR #10
 # would silently revert per-modality dimensions to a single shared value, so

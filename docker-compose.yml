@@ -99,7 +99,7 @@ services:
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "11112"]
+      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
       interval: 10s
       timeout: 5s
       retries: 3
