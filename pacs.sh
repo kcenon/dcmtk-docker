@@ -242,6 +242,44 @@ cmd_status() {
     print_status_table
 }
 
+# Wipe the PACS storage directories on the host side, scoped to the
+# compose project's PACS service containers. Required before re-running
+# test-store.sh against a stack that already holds studies from a prior
+# run; the test-client container itself has no Docker CLI and no access
+# to the PACS volumes (see issue #19).
+#
+# The PACS entrypoint re-indexes synthetic test data on every container
+# start unless a .indexed marker exists. After wiping storage we recreate
+# the marker so the restart leaves PACS empty rather than re-populating
+# it from /dicom/testdata. See scripts/entrypoint.sh.
+clean_pacs_storage() {
+    local svc storage_dir state cid
+    storage_dir="/dicom/db"
+    for svc in pacs-server pacs-server-2; do
+        cid=$(service_container_id "${svc}")
+        if [ -z "${cid}" ]; then
+            state="not found"
+        else
+            state=$(docker inspect --format='{{.State.Status}}' "${cid}" 2>/dev/null || echo "not found")
+        fi
+        if [ "${state}" != "running" ]; then
+            warn "${svc} not running; skipping host-side cleanup"
+            continue
+        fi
+        info "Wiping ${svc}:${storage_dir} (host-side cleanup)"
+        ${DC} exec -T "${svc}" sh -c "
+            find '${storage_dir}' -mindepth 1 -delete 2>/dev/null || true
+            mkdir -p \"${storage_dir}/\${AE_TITLE}\"
+            touch \"${storage_dir}/\${AE_TITLE}/.indexed\"
+        "
+    done
+
+    # Restart the PACS services so dcmqrscp re-reads its (now-empty) index.
+    info "Restarting PACS services to reload empty index"
+    ${DC} restart pacs-server pacs-server-2 >/dev/null
+    wait_for_services 60 pacs-server pacs-server-2 || warn "PACS services not healthy after restart"
+}
+
 cmd_test() {
     # If the first arg looks like an option (starts with '-'), treat the suite
     # as the default 'all' and forward every arg to the test script. Otherwise
@@ -286,6 +324,12 @@ cmd_test() {
         err "Required SCP services are not healthy; aborting test run."
         exit 1
     fi
+
+    # Suites that require PACS to start empty need host-side cleanup,
+    # because the in-container helper cannot reach the PACS volumes.
+    case "${suite}" in
+        store|all) clean_pacs_storage ;;
+    esac
 
     local script
     if [ "${suite}" = "all" ]; then
