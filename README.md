@@ -422,6 +422,38 @@ Even with a peer whitelist, a production deployment should add:
 - **Access reviews**: Periodically audit the HostTable; remove
   decommissioned peers and rotate AE Titles when needed.
 
+### Restricted AE whitelist profile (opt-in)
+
+For test runs that need to exercise production-like access control
+without leaving the repo, the project ships a second pair of dcmqrscp
+config templates wired to the `all_peers` whitelist:
+
+| Mode | Template (Primary) | Template (Secondary) | Peers field |
+|------|--------------------|----------------------|-------------|
+| `test` (default) | `dcmqrscp-primary.cfg.template` | `dcmqrscp-secondary.cfg.template` | `ANY` |
+| `restricted` (opt-in) | `dcmqrscp-primary-restricted.cfg.template` | `dcmqrscp-secondary-restricted.cfg.template` | `all_peers` |
+
+The `restricted` profile keeps the same HostTable entries used by the
+test suite (`test_client`, `store_scp`, sibling PACS), so the default
+test data path still works. Any Calling AE Title outside that list is
+rejected at association setup.
+
+```bash
+# Start the stack in restricted (whitelist) mode
+docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d
+
+# Run the negative tests that assert unknown callers are rejected
+docker compose exec test-client bash /tests/test-restricted-mode.sh
+
+# Return to the default (test) mode
+docker compose down
+docker compose up -d
+```
+
+`./pacs.sh up` continues to launch the default `test` mode unchanged;
+restricted mode is purely an opt-in compose override (see
+`docker-compose.restricted.yml`).
+
 ## Project Structure
 
 ```
