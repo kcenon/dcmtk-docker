@@ -57,7 +57,12 @@ jobs:
           for i in $(seq 1 60); do
             pending=""
             for svc in $services; do
-              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$svc" 2>/dev/null || echo "starting")
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
               if [ "$status" != "healthy" ]; then
                 pending="$pending $svc=$status"
               fi
@@ -71,7 +76,12 @@ jobs:
           done
           echo "ERROR: not all SCP services became healthy in time"
           for svc in $services; do
-            status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$svc" 2>/dev/null || echo "missing")
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
             if [ "$status" != "healthy" ]; then
               echo "=== $svc not healthy (status: $status); logs ==="
               docker compose logs --tail=100 "$svc" || true
@@ -124,7 +134,12 @@ jobs:
           for i in $(seq 1 60); do
             pending=""
             for svc in $services; do
-              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$svc" 2>/dev/null || echo "starting")
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
               if [ "$status" != "healthy" ]; then
                 pending="$pending $svc=$status"
               fi
@@ -138,7 +153,12 @@ jobs:
           done
           echo "ERROR: not all SCP services became healthy in time"
           for svc in $services; do
-            status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$svc" 2>/dev/null || echo "missing")
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
             if [ "$status" != "healthy" ]; then
               echo "=== $svc not healthy (status: $status); logs ==="
               docker compose logs --tail=100 "$svc" || true
@@ -185,7 +205,12 @@ jobs:
           for i in $(seq 1 60); do
             pending=""
             for svc in $services; do
-              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$svc" 2>/dev/null || echo "starting")
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
               if [ "$status" != "healthy" ]; then
                 pending="$pending $svc=$status"
               fi
@@ -199,7 +224,12 @@ jobs:
           done
           echo "ERROR: not all SCP services became healthy in time"
           for svc in $services; do
-            status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$svc" 2>/dev/null || echo "missing")
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
             if [ "$status" != "healthy" ]; then
               echo "=== $svc not healthy (status: $status); logs ==="
               docker compose logs --tail=100 "$svc" || true
