@@ -499,8 +499,43 @@ jobs:
         if: always()
         run: docker compose down -v
 
-  # NOTE: there is intentionally no TLS CI job. The stock Debian apt dcmtk
-  # package is not linked against OpenSSL, so dcmqrscp rejects +tls
+  test-tls-skip:
+    name: test-tls.sh skips cleanly on the cleartext stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults
+        run: cp env.default .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Assert test-tls.sh skips on the cleartext stack
+        # test-tls.sh checks TLS_ENABLED before touching any SCP, so the default
+        # (cleartext) stack must make it skip with exit 0. Proving the skip path
+        # still works guards against a silent regression in its guards. There is
+        # intentionally no TLS-serving job: the stock apt dcmtk is not
+        # OpenSSL-linked, so +tls cannot run on this base image.
+        run: |
+          out=$(docker compose exec -T test-client /tests/test-tls.sh)
+          echo "$out"
+          echo "$out" | grep -q "SKIP" || { echo "ERROR: expected test-tls.sh to SKIP on the cleartext stack"; exit 1; }
+          echo "OK: test-tls.sh skipped cleanly"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  # NOTE: the test-tls-skip job above exercises tests/test-tls.sh's skip path on
+  # the base image. There is intentionally no TLS-SERVING job: the stock Debian
+  # apt dcmtk package is not linked against OpenSSL, so dcmqrscp rejects +tls
   # ("Unknown option +tls"). The TLS profile (docker-compose.tls.yml) and
-  # tests/test-tls.sh are ready for a TLS-capable (OpenSSL-linked) dcmtk image
-  # but cannot be exercised on this base image; test-tls.sh skips accordingly.
+  # tests/test-tls.sh are ready for a TLS-capable (OpenSSL-linked) dcmtk image.
