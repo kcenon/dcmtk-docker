@@ -581,6 +581,13 @@ cmd_add_peer() {
         exit 1
     fi
     ensure_env
+    # Validate fields so a malformed entry never reaches EXTRA_PEERS or the
+    # HostTable injector (see scripts/inject-extra-peers.sh). The space- and
+    # colon-delimited EXTRA_PEERS format forbids those characters in fields.
+    case "${name}" in ""|*[!A-Za-z0-9_]*) err "Invalid peer name '${name}' (letters, digits, underscore only)"; exit 1 ;; esac
+    case "${ae}"   in ""|*[!A-Za-z0-9_]*) err "Invalid AE title '${ae}' (letters, digits, underscore only)"; exit 1 ;; esac
+    case "${host}" in ""|*[!A-Za-z0-9.-]*) err "Invalid host '${host}'"; exit 1 ;; esac
+    case "${port}" in ""|*[!0-9]*) err "Invalid port '${port}' (must be numeric)"; exit 1 ;; esac
     local entry="${name}=${ae}:${host}:${port}"
     local current newval
     current=$(read_env_value "EXTRA_PEERS" "")
