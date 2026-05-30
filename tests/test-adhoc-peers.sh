@@ -89,5 +89,44 @@ else
 fi
 rm -f "${CFG3}" "${CFG3B}"
 
+# Test 5: malformed entries are skipped (no config corruption); valid ones land.
+TEST_TOTAL=$((TEST_TOTAL + 1))
+CFG4=$(mktemp)
+make_cfg > "${CFG4}"
+# bad=ONLYAE (no colon), x=A:h:abc (non-numeric port), good=GOODAE:gh:11116 (valid)
+EXTRA_PEERS="bad=ONLYAE x=A:h:abc good=GOODAE:gh:11116" bash "${INJECT}" "${CFG4}" 2>/dev/null
+if grep -q 'good = (GOODAE, gh, 11116)' "${CFG4}" \
+   && grep -q 'all_peers = test_client, store_scp, good' "${CFG4}" \
+   && ! grep -q 'bad' "${CFG4}" \
+   && ! grep -q '( , ' "${CFG4}" \
+   && ! grep -q ', )' "${CFG4}"; then
+    print_pass "inject: malformed peers skipped, valid peer injected, no corruption"
+    TEST_PASSED=$((TEST_PASSED + 1))
+else
+    print_fail "inject: malformed-peer handling incorrect"
+    TEST_FAILED=$((TEST_FAILED + 1))
+fi
+rm -f "${CFG4}"
+
+# Test 6: an indented all_peers line (production-style) is still matched.
+TEST_TOTAL=$((TEST_TOTAL + 1))
+CFG5=$(mktemp)
+cat > "${CFG5}" <<'CFG'
+HostTable BEGIN
+  modality_ct1 = (CT1, ct1-host, 104)
+  all_peers      = modality_ct1
+HostTable END
+CFG
+EXTRA_PEERS="adhoc=EXT_SCP:ext-host:11114" bash "${INJECT}" "${CFG5}" 2>/dev/null
+if grep -q 'adhoc = (EXT_SCP, ext-host, 11114)' "${CFG5}" \
+   && grep -Eq 'all_peers[[:space:]]*=.*adhoc' "${CFG5}"; then
+    print_pass "inject: indented all_peers line is matched (no silent no-op)"
+    TEST_PASSED=$((TEST_PASSED + 1))
+else
+    print_fail "inject: indented all_peers not matched (silent no-op)"
+    TEST_FAILED=$((TEST_FAILED + 1))
+fi
+rm -f "${CFG5}"
+
 print_summary "Ad-hoc Peers"
 [ "${TEST_FAILED}" -eq 0 ]
