@@ -1,4 +1,6 @@
 #!/bin/bash
+# Sourced by other scripts; intentionally no `set -euo pipefail` here so it does
+# not alter the caller's shell options.
 
 # Shared PixelData profile defaults for generator and tests.
 # The caller may override per-modality dimensions with {CT,MR,CR}_PIXEL_ROWS

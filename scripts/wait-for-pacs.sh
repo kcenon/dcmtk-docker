@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Wait for a DICOM SCP to become reachable via C-ECHO.
 # Usage: wait-for-pacs.sh <host> <port> [ae_title] [max_retries] [interval]

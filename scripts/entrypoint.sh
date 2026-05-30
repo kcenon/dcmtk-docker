@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # DCMTK PACS Test Environment - Entrypoint Script
 # Dispatches to the appropriate service based on the ROLE environment variable.
