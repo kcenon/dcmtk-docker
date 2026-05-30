@@ -535,47 +535,44 @@ docker compose run --rm -e ROLE=custom test-client \
 
 ### TLS-Secured DICOM (DICOM TLS)
 
-DCMTK 3.6.7 supports TLS for encrypted DICOM communication. This is not enabled
-by default in this test environment but can be configured manually.
+**Important:** the stock Debian apt `dcmtk` package this image is built on is
+**not** linked against OpenSSL, so its tools reject `+tls` ("Unknown option
++tls"). TLS therefore cannot be served on the default image. The repository
+ships the complete wiring so a TLS-capable (source-built / OpenSSL-linked) dcmtk
+image can serve TLS without further changes:
 
-**Generating test certificates:**
+- `docker-compose.tls.yml` — an overlay that switches the primary PACS to
+  authenticated `dcmqrscp +tls`.
+- `scripts/gen-certs.sh` — generates a self-signed CA + server + client
+  certificates into the shared `tls-certs` volume at container start.
+- `tests/test-tls.sh` — asserts a `+tls` C-ECHO succeeds while a plaintext
+  association is refused; it skips cleanly when TLS is unavailable.
 
-```bash
-# Enter test-client shell
-docker compose exec test-client bash
+On the default (non-OpenSSL) image the entrypoint detects the missing `+tls`
+support and, when `TLS_ENABLED=true`, **refuses to start (exit 1)** with a clear
+error rather than silently downgrading to cleartext.
 
-# Generate a self-signed CA and server/client certificates
-openssl req -x509 -newkey rsa:2048 -keyout ca-key.pem -out ca-cert.pem \
-    -days 365 -nodes -subj "/CN=DICOM-Test-CA"
-
-openssl req -newkey rsa:2048 -keyout server-key.pem -out server-csr.pem \
-    -nodes -subj "/CN=pacs-server"
-openssl x509 -req -in server-csr.pem -CA ca-cert.pem -CAkey ca-key.pem \
-    -CAcreateserial -out server-cert.pem -days 365
-
-openssl req -newkey rsa:2048 -keyout client-key.pem -out client-csr.pem \
-    -nodes -subj "/CN=test-client"
-openssl x509 -req -in client-csr.pem -CA ca-cert.pem -CAkey ca-key.pem \
-    -CAcreateserial -out client-cert.pem -days 365
-```
-
-**Using TLS with DCMTK tools:**
+**Running the overlay** (meaningful only on a TLS-capable image):
 
 ```bash
-# TLS-enabled C-ECHO
-echoscu +tls client-key.pem client-cert.pem \
-    --add-cert-file ca-cert.pem \
-    -aet TEST_SCU -aec DCMTK_PACS pacs-server 2762
-
-# TLS-enabled store receiver
-storescp +tls server-key.pem server-cert.pem \
-    --add-cert-file ca-cert.pem \
-    -od /dicom/received 2762
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.tls.yml \
+    exec test-client /tests/test-tls.sh
 ```
 
-Note: TLS requires a separate port (conventionally 2762 for DICOM TLS). The PACS
-server itself (dcmqrscp) would need to be started with `+tls` flags — this requires
-modifying the entrypoint script.
+`gen-certs.sh` produces the certificates automatically; the DCMTK TLS tool
+invocations then look like the following (these succeed only against a
+TLS-capable build — on the stock image they fail with "Unknown option +tls"):
+
+```bash
+# TLS-enabled C-ECHO with the generated client certificate
+echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem \
+    +cf /dicom/certs/ca-cert.pem \
+    -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112
+```
+
+To actually serve TLS, build the image from an OpenSSL-linked dcmtk (a source
+build) in place of the stock apt package.
 
 ### Adding Additional PACS Nodes
 

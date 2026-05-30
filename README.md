@@ -606,7 +606,7 @@ restricted mode is purely an opt-in compose override (see
 dcmtk_docker/
 ├── pacs.sh                             # CLI wrapper (./pacs.sh help)
 ├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK (non-root)
-├── docker-compose.yml                  # 4 services, 1 network, 3 volumes
+├── docker-compose.yml                  # 5 services, 1 network, 4 volumes
 ├── docker-compose.restricted.yml       # Overlay: AE-whitelist (restricted) mode
 ├── docker-compose.tls.yml              # Overlay: secure DICOM (TLS) mode
 ├── env.default                         # Default environment values (copy to .env)
