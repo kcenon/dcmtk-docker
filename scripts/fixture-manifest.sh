@@ -94,3 +94,13 @@ MANIFEST_STUDY_DATE_RANGE="20240101-20240331"
 # Identifiers guaranteed NOT to exist in the dataset, for negative tests.
 MANIFEST_NONEXISTENT_PATIENT_ID="NONEXISTENT"
 MANIFEST_NONEXISTENT_STUDY_UID="1.2.3.999.999.999"
+
+# ── Modality Worklist (MWL) ─────────────────────────────────────────────────
+# The MWL SCP (wlmscpfs) serves scheduled procedure steps that reuse the patient
+# identity above, so a modality fetching its worklist sees the same patients it
+# will later store images for. AE titles are overridable for foreign-target runs.
+MANIFEST_WLM_AE_TITLE="${WLM_AE_TITLE:-DCMTK_WLM}"
+MANIFEST_WLM_STATION_AE="${WLM_STATION_AE:-MODALITY01}"
+MANIFEST_WLM_STATION_NAME="STATION01"
+MANIFEST_WLM_PHYSICIAN="PHYSICIAN^A"
+MANIFEST_WLM_START_TIME="120000"

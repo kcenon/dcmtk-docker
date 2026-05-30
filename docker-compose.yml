@@ -109,6 +109,36 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  # ── Modality Worklist Server (wlmscpfs) ────────────
+  # Serves a Modality Worklist (findscu -W) built from the same fixture
+  # manifest as the Q/R data, so a modality sees the patients it will store.
+  mwl-server:
+    build: .
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
+    environment:
+      - ROLE=worklist
+      - AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
+      - WLM_AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
+      - WLM_STATION_AE=${WLM_STATION_AE:-MODALITY01}
+      - DICOM_PORT=11112
+      - WLM_DATA_DIR=/dicom/worklist
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
+    ports:
+      - "${WLM_HOST_PORT:-11115}:11112"
+    volumes:
+      - worklist-data:/dicom/worklist
+    networks:
+      - dicom-net
+    healthcheck:
+      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   # ── Test Client ────────────────────────────────────
   # Interactive container with all DCMTK SCU tools
   test-client:
@@ -142,6 +172,9 @@ services:
       - TEST_DATA_DIR=/dicom/testdata
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
       - STORESCP_STORAGE_DIR=/dicom/received
+      - WLM_HOST=mwl-server
+      - WLM_AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
+      - WLM_STATION_AE=${WLM_STATION_AE:-MODALITY01}
     volumes:
       - ./data:/dicom/testdata
       - ./tests:/tests:ro
@@ -159,6 +192,8 @@ services:
         condition: service_healthy
       storescp-receiver:
         condition: service_healthy
+      mwl-server:
+        condition: service_healthy
 
 networks:
   dicom-net:
@@ -168,3 +203,4 @@ volumes:
   pacs-data:
   pacs2-data:
   received-data:
+  worklist-data:

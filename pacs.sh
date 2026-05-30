@@ -39,9 +39,9 @@ else
 fi
 
 # ── Service definitions ──────────────────────────
-ALL_SERVICES=(pacs-server pacs-server-2 storescp-receiver test-client)
-SCP_SERVICES=(pacs-server pacs-server-2 storescp-receiver)
-VALID_TESTS=(all echo store find move pixeldata transfer-syntax load-smoke)
+ALL_SERVICES=(pacs-server pacs-server-2 storescp-receiver mwl-server test-client)
+SCP_SERVICES=(pacs-server pacs-server-2 storescp-receiver mwl-server)
+VALID_TESTS=(all echo store find move pixeldata transfer-syntax load-smoke worklist)
 
 # ── Helper functions ─────────────────────────────
 info()  { printf "${C_CYAN}>>>${C_RESET} %s\n" "$*"; }
