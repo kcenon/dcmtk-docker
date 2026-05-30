@@ -346,6 +346,26 @@ wiped safely.
 |------|------|---------|-------|
 | `data/dicom-templates/` | Source fixture | Yes | `*.dump` templates consumed by the generator; never delete |
 | `data/ct/`, `data/mr/`, `data/cr/` | Generated | No | Synthetic DICOM written on first `./pacs.sh up` |
+
+#### Test-data manifest (single source of truth)
+
+The identity of the synthetic dataset — the OID root, every study/series UID,
+the expected instance counts, and the patient demographics — lives in one file:
+`scripts/fixture-manifest.sh`. Both the generator (`scripts/generate-test-data.sh`)
+and the test scripts (via `tests/test-helpers.sh`) source it, so no magic UID or
+count is duplicated where it could drift out of sync.
+
+**Pointing the suite at an external (non-DCMTK) PACS.** Every query key and
+assertion reads from the manifest, so you can validate a third-party archive
+without editing a test:
+
+1. Set `OID_ROOT` to a value that will not collide with the target's data
+   (e.g. `OID_ROOT=1.2.3.myorg.test`).
+2. Generate the dataset (`scripts/generate-test-data.sh`) and load it into the
+   target PACS with `storescu`.
+3. Point the test scripts at the target via the `PACS_HOST` / `PACS_PORT` /
+   `PACS_AE_TITLE` environment variables and run them — the assertions follow
+   `OID_ROOT` automatically.
 | `data/dicom-output/`, `data/received/` | Generated | No | Test runtime artifacts |
 
 To regenerate test data, remove the generated directories and restart:

@@ -61,8 +61,8 @@ fi
 receiver_cleanup_storage "${RECEIVER_STORAGE_DIR}" || exit 1
 
 # ── Test 1: C-MOVE CT study (PAT001, 5 instances) ────
-CT_STUDY_UID="${OID_ROOT}.1.1"
-CT_EXPECTED=5
+CT_STUDY_UID="${MANIFEST_CT_STUDY_UID}"
+CT_EXPECTED="${MANIFEST_CT_COUNT}"
 receiver_cleanup_storage "${RECEIVER_STORAGE_DIR}"
 run_test "retrieve CT study PAT001 to ${STORESCP_AE}" "C-MOVE" \
     movescu -aet "${MY_AE}" -aec "${PACS_AE}" -aem "${STORESCP_AE}" \
@@ -74,8 +74,8 @@ verify_move_count "CT study PAT001 instance count" "${CT_EXPECTED}" "${RECEIVER_
 verify_move_uids  "CT study PAT001 UIDs"           "${CT_STUDY_UID}" "" "${RECEIVER_STORAGE_DIR}" || true
 
 # ── Test 2: C-MOVE MR study (PAT002, 6 instances) ────
-MR_STUDY_UID="${OID_ROOT}.2.1"
-MR_EXPECTED=6
+MR_STUDY_UID="${MANIFEST_MR_STUDY_UID}"
+MR_EXPECTED="${MANIFEST_MR_COUNT}"
 receiver_cleanup_storage "${RECEIVER_STORAGE_DIR}"
 run_test "retrieve MR study PAT002 to ${STORESCP_AE}" "C-MOVE" \
     movescu -aet "${MY_AE}" -aec "${PACS_AE}" -aem "${STORESCP_AE}" \
@@ -87,8 +87,8 @@ verify_move_count "MR study PAT002 instance count" "${MR_EXPECTED}" "${RECEIVER_
 verify_move_uids  "MR study PAT002 UIDs"           "${MR_STUDY_UID}" "" "${RECEIVER_STORAGE_DIR}" || true
 
 # ── Test 3: C-MOVE CR study (PAT003, 2 instances) ────
-CR_STUDY_UID="${OID_ROOT}.3.1"
-CR_EXPECTED=2
+CR_STUDY_UID="${MANIFEST_CR_STUDY_UID}"
+CR_EXPECTED="${MANIFEST_CR_COUNT}"
 receiver_cleanup_storage "${RECEIVER_STORAGE_DIR}"
 run_test "retrieve CR study PAT003 to ${STORESCP_AE}" "C-MOVE" \
     movescu -aet "${MY_AE}" -aec "${PACS_AE}" -aem "${STORESCP_AE}" \
@@ -107,7 +107,7 @@ TEST_TOTAL=$((TEST_TOTAL + 1))
 MOVE_OUTPUT=$(movescu -v -aet "${MY_AE}" -aec "${PACS_AE}" -aem "${STORESCP_AE}" \
     -S "${PACS_HOST}" "${PACS_PORT}" \
     -k QueryRetrieveLevel=STUDY \
-    -k StudyInstanceUID="1.2.3.999.999.999" 2>&1 || true)
+    -k StudyInstanceUID="${MANIFEST_NONEXISTENT_STUDY_UID}" 2>&1 || true)
 
 if echo "${MOVE_OUTPUT}" | grep -qi "error\|refused\|abort" 2>/dev/null; then
     print_fail "C-MOVE: nonexistent study (unexpected error)"
@@ -121,8 +121,8 @@ verify_move_count "nonexistent study leaves receiver empty" 0 "${RECEIVER_STORAG
 
 # ── Test 5: C-MOVE at SERIES level ───────────────────
 # Retrieve only the T1 series from PAT002's MR study (3 instances).
-T1_SERIES_UID="${OID_ROOT}.2.1.1"
-T1_EXPECTED=3
+T1_SERIES_UID="${MANIFEST_MR_T1_SERIES_UID}"
+T1_EXPECTED="${MANIFEST_MR_T1_COUNT}"
 receiver_cleanup_storage "${RECEIVER_STORAGE_DIR}"
 run_test "retrieve MR T1 series (SERIES level) to ${STORESCP_AE}" "C-MOVE" \
     movescu -aet "${MY_AE}" -aec "${PACS_AE}" -aem "${STORESCP_AE}" \
