@@ -41,7 +41,7 @@ fi
 # ── Service definitions ──────────────────────────
 ALL_SERVICES=(pacs-server pacs-server-2 storescp-receiver mwl-server test-client)
 SCP_SERVICES=(pacs-server pacs-server-2 storescp-receiver mwl-server)
-VALID_TESTS=(all echo store find move pixeldata transfer-syntax load-smoke worklist)
+VALID_TESTS=(all echo store find move pixeldata transfer-syntax load-smoke worklist adhoc-peers)
 
 # ── Helper functions ─────────────────────────────
 info()  { printf "${C_CYAN}>>>${C_RESET} %s\n" "$*"; }
@@ -546,6 +546,8 @@ ${C_BOLD}Commands:${C_RESET}
                     data/dicom-templates source fixtures
   ${C_GREEN}echo${C_RESET} [host] [port] [called-ae] [calling-ae]
                     Quick C-ECHO verification
+  ${C_GREEN}add-peer${C_RESET} <name> <ae> <host> <port>
+                    Register an ad-hoc C-MOVE destination and restart PACS
   ${C_GREEN}version${C_RESET}           Show the dcmtk-docker version
   ${C_GREEN}help${C_RESET}              Show this help message
 
@@ -566,6 +568,43 @@ ${C_BOLD}Services:${C_RESET}
 EOF
 }
 
+# ── Ad-hoc C-MOVE peer registration ──────────────
+# Register an ad-hoc C-MOVE destination by appending to EXTRA_PEERS in .env and
+# restarting the PACS so dcmqrscp re-reads its HostTable. dcmqrscp only loads its
+# config at startup, so a restart is required for the new destination to apply.
+cmd_add_peer() {
+    local name="${1:-}" ae="${2:-}" host="${3:-}" port="${4:-}"
+    if [ -z "${name}" ] || [ -z "${ae}" ] || [ -z "${host}" ] || [ -z "${port}" ]; then
+        err "Usage: ./pacs.sh add-peer <name> <ae-title> <host> <port>"
+        echo "  Registers an ad-hoc C-MOVE destination (sets EXTRA_PEERS) and"
+        echo "  restarts the PACS so dcmqrscp picks it up."
+        exit 1
+    fi
+    ensure_env
+    local entry="${name}=${ae}:${host}:${port}"
+    local current newval
+    current=$(read_env_value "EXTRA_PEERS" "")
+    if [ -n "${current}" ]; then
+        newval="${current} ${entry}"
+    else
+        newval="${entry}"
+    fi
+    if grep -q '^EXTRA_PEERS=' .env 2>/dev/null; then
+        sed -i.bak "s|^EXTRA_PEERS=.*|EXTRA_PEERS=${newval}|" .env && rm -f .env.bak
+    else
+        echo "EXTRA_PEERS=${newval}" >> .env
+    fi
+    info "Registered ad-hoc peer: ${entry}"
+    info "Restarting PACS services to apply..."
+    ${DC} up -d pacs-server pacs-server-2
+    if wait_for_services 60 pacs-server pacs-server-2; then
+        ok "Peer '${name}' is now a valid C-MOVE destination"
+        info "EXTRA_PEERS=${newval}"
+    else
+        warn "PACS services not healthy after restart"
+    fi
+}
+
 # ── Main dispatch ────────────────────────────────
 command="${1:-help}"
 shift 2>/dev/null || true
@@ -581,6 +620,7 @@ case "${command}" in
     clean)   cmd_clean "$@" ;;
     clean-data) cmd_clean_data "$@" ;;
     echo)    cmd_echo "$@" ;;
+    add-peer) cmd_add_peer "$@" ;;
     version|--version|-v) echo "dcmtk-docker ${PACS_VERSION}" ;;
     help|-h|--help) cmd_help ;;
     *)

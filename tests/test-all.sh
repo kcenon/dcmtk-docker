@@ -119,6 +119,7 @@ run_suite "C-FIND"    "${SCRIPT_DIR}/test-find.sh"
 run_suite "C-MOVE"    "${SCRIPT_DIR}/test-move.sh"
 run_suite "PixelData" "${SCRIPT_DIR}/test-pixeldata.sh"
 run_suite "MWL"       "${SCRIPT_DIR}/test-worklist.sh"
+run_suite "Ad-hocPeers" "${SCRIPT_DIR}/test-adhoc-peers.sh"
 
 # ── Final Summary ─────────────────────────────────────
 echo ""

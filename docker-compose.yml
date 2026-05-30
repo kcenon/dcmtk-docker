@@ -31,6 +31,8 @@ services:
       - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
       - TEST_SCU_AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary.cfg.template
+      # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
+      - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
       - "${PACS1_HOST_PORT:-11112}:11112"
     volumes:
@@ -68,6 +70,8 @@ services:
       - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
       - TEST_SCU_AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-secondary.cfg.template
+      # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
+      - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
       - "${PACS2_HOST_PORT:-11113}:11112"
     volumes:

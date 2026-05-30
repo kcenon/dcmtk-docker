@@ -97,7 +97,8 @@ A unified CLI script wraps all common operations:
 | `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`, `adhoc-peers`) |
+| `./pacs.sh add-peer <name> <ae> <host> <port>` | Register an ad-hoc C-MOVE destination and restart the PACS |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
 | `./pacs.sh reset` | Wipe volumes and restart fresh |
@@ -624,6 +625,7 @@ dcmtk_docker/
 │   ├── fixture-manifest.sh             # Shared fixture identity (SSOT)
 │   ├── generate-test-data.sh           # Synthetic DICOM generation
 │   ├── generate-worklist.sh            # Modality Worklist (.wl) generation
+│   ├── inject-extra-peers.sh           # Ad-hoc C-MOVE HostTable injection
 │   ├── pixel-data-profile.sh           # Shared PixelData profile defaults
 │   └── wait-for-pacs.sh                # Readiness polling
 ├── data/
@@ -641,6 +643,7 @@ dcmtk_docker/
 │   ├── test-load-smoke.sh              # Operational load smoke tests
 │   ├── test-restricted-mode.sh         # AE-whitelist rejection tests
 │   ├── test-worklist.sh                # Modality Worklist (findscu -W) tests
+│   ├── test-adhoc-peers.sh             # Ad-hoc C-MOVE peer injection tests
 │   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
 └── docs/
