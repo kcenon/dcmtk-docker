@@ -39,6 +39,7 @@ jobs:
           - test-find.sh
           - test-move.sh
           - test-worklist.sh
+          - test-adhoc-peers.sh
     steps:
       - name: Checkout
         uses: actions/checkout@v4

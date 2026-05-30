@@ -60,6 +60,14 @@ start_pacs_server() {
         exit 1
     fi
 
+    # Inject ad-hoc C-MOVE destinations from EXTRA_PEERS (if any) into the
+    # rendered HostTable, so retrieval to an external listener does not require
+    # editing the template or rebuilding. See scripts/inject-extra-peers.sh.
+    if [ -n "${EXTRA_PEERS:-}" ] && [ -x /usr/local/bin/inject-extra-peers.sh ]; then
+        log_info "Injecting ad-hoc C-MOVE peers: ${EXTRA_PEERS}"
+        /usr/local/bin/inject-extra-peers.sh /tmp/dcmqrscp.cfg
+    fi
+
     # Security check: warn if rendered config uses 'ANY' Peers
     # (test default; not safe for production - see config/dcmqrscp-production.cfg.example)
     if grep -Eq '^[[:space:]]*[^#].*[[:space:]]ANY[[:space:]]*$' /tmp/dcmqrscp.cfg; then
