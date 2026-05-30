@@ -945,6 +945,11 @@ storescu -v +sd +r -aet BULK_SCU -aec PACS_SCP localhost 11112 /dicom/large_data
 
 When you don't have real DICOM images, create synthetic test files:
 
+> Note: the `1.2.826.0.1.3680043.8.1055.*` UIDs below are illustrative
+> research-only examples. The canonical OID root used by this project's
+> generator and tests is `1.2.826.0.1.3680043.8.499` (see `env.default`
+> and `scripts/generate-test-data.sh`).
+
 ```bash
 # Method 1: Create from dump file
 cat > /tmp/test.dump << 'EOF'

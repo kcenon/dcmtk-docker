@@ -1,0 +1,541 @@
+name: Test Isolation
+
+# Verify each test script can run independently in a fresh container
+# (issue #4). Every matrix job spins up the docker-compose stack from
+# scratch, executes a single test script via test-client, and tears the
+# stack down with volumes wiped. Any cross-script ordering dependency
+# would surface here as a failed job.
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'tests/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - 'scripts/**'
+      - 'config/**'
+      - '.github/workflows/test-isolation.yml'
+  push:
+    branches: [develop, main]
+    paths:
+      - 'tests/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - 'scripts/**'
+      - 'config/**'
+      - '.github/workflows/test-isolation.yml'
+
+jobs:
+  test-isolation:
+    name: ${{ matrix.test }} (isolated)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - test-echo.sh
+          - test-store.sh
+          - test-find.sh
+          - test-move.sh
+          - test-worklist.sh
+          - test-adhoc-peers.sh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults
+        run: cp env.default .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          # Give services a moment to settle past their start_period
+          sleep 5
+
+      - name: Wait for all SCP services to be healthy
+        run: |
+          services="pacs-server pacs-server-2 storescp-receiver mwl-server"
+          for i in $(seq 1 60); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
+              if [ "$status" != "healthy" ]; then
+                pending="$pending $svc=$status"
+              fi
+            done
+            if [ -z "$pending" ]; then
+              echo "All SCP services are healthy"
+              exit 0
+            fi
+            echo "waiting for SCP services (attempt $i/60, pending:$pending)"
+            sleep 2
+          done
+          echo "ERROR: not all SCP services became healthy in time"
+          for svc in $services; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
+            if [ "$status" != "healthy" ]; then
+              echo "=== $svc not healthy (status: $status); logs ==="
+              docker compose logs --tail=100 "$svc" || true
+            fi
+          done
+          exit 1
+
+      - name: Wipe PACS storage on the host before test-store.sh
+        # test-store.sh requires an empty PACS so its >= 3 study-count
+        # check is meaningful. The PACS entrypoint indexes synthetic test
+        # data on first boot, so cleanup must run on the host (the
+        # test-client image has no Docker CLI). See issue #19.
+        #
+        # The entrypoint re-indexes test data on every container start
+        # unless a .indexed marker exists. After wiping storage we recreate
+        # the marker so the restart leaves PACS empty rather than re-
+        # populating it from /dicom/testdata. See scripts/entrypoint.sh.
+        if: matrix.test == 'test-store.sh'
+        run: |
+          for svc in pacs-server pacs-server-2; do
+            docker compose exec -T "$svc" sh -c '
+              find /dicom/db -mindepth 1 -delete 2>/dev/null || true
+              mkdir -p "/dicom/db/${AE_TITLE}"
+              touch "/dicom/db/${AE_TITLE}/.indexed"
+            '
+          done
+          docker compose restart pacs-server pacs-server-2
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server healthy after cleanup"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run ${{ matrix.test }} in isolation
+        run: |
+          docker compose exec -T test-client /tests/${{ matrix.test }}
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "=== pacs-server logs ==="
+          docker compose logs pacs-server || true
+          echo "=== pacs-server-2 logs ==="
+          docker compose logs pacs-server-2 || true
+          echo "=== storescp-receiver logs ==="
+          docker compose logs storescp-receiver || true
+          echo "=== test-client logs ==="
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  test-pixeldata:
+    name: test-pixeldata.sh with GENERATE_PIXEL_DATA=true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults with PixelData enabled
+        run: |
+          cp env.default .env
+          # Flip the opt-in switch and verify it took
+          sed -i 's/^GENERATE_PIXEL_DATA=.*/GENERATE_PIXEL_DATA=true/' .env
+          grep '^GENERATE_PIXEL_DATA=true' .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Wait for all SCP services to be healthy
+        run: |
+          services="pacs-server pacs-server-2 storescp-receiver mwl-server"
+          for i in $(seq 1 60); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
+              if [ "$status" != "healthy" ]; then
+                pending="$pending $svc=$status"
+              fi
+            done
+            if [ -z "$pending" ]; then
+              echo "All SCP services are healthy"
+              exit 0
+            fi
+            echo "waiting for SCP services (attempt $i/60, pending:$pending)"
+            sleep 2
+          done
+          echo "ERROR: not all SCP services became healthy in time"
+          for svc in $services; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
+            if [ "$status" != "healthy" ]; then
+              echo "=== $svc not healthy (status: $status); logs ==="
+              docker compose logs --tail=100 "$svc" || true
+            fi
+          done
+          exit 1
+
+      - name: Run test-pixeldata.sh
+        run: docker compose exec -T -e GENERATE_PIXEL_DATA=true test-client /tests/test-pixeldata.sh
+
+      - name: Verify findscu/movescu still recognize the files
+        run: |
+          docker compose exec -T test-client /tests/test-find.sh
+          docker compose exec -T test-client /tests/test-move.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs pacs-server || true
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  test-store-idempotency:
+    name: test-store.sh twice (idempotency)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults
+        run: cp env.default .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Wait for all SCP services to be healthy
+        run: |
+          services="pacs-server pacs-server-2 storescp-receiver mwl-server"
+          for i in $(seq 1 60); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
+              if [ "$status" != "healthy" ]; then
+                pending="$pending $svc=$status"
+              fi
+            done
+            if [ -z "$pending" ]; then
+              echo "All SCP services are healthy"
+              exit 0
+            fi
+            echo "waiting for SCP services (attempt $i/60, pending:$pending)"
+            sleep 2
+          done
+          echo "ERROR: not all SCP services became healthy in time"
+          for svc in $services; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
+            if [ "$status" != "healthy" ]; then
+              echo "=== $svc not healthy (status: $status); logs ==="
+              docker compose logs --tail=100 "$svc" || true
+            fi
+          done
+          exit 1
+
+      - name: Wipe PACS storage on the host before first run
+        # The PACS entrypoint indexes synthetic test data on first boot,
+        # so the volumes are dirty even before any storescu. Cleanup must
+        # run on the host (the test-client image has no Docker CLI). See
+        # issue #19.
+        #
+        # The entrypoint re-indexes test data on every container start
+        # unless a .indexed marker exists. After wiping storage we recreate
+        # the marker so the restart leaves PACS empty rather than re-
+        # populating it from /dicom/testdata. See scripts/entrypoint.sh.
+        run: |
+          for svc in pacs-server pacs-server-2; do
+            docker compose exec -T "$svc" sh -c '
+              find /dicom/db -mindepth 1 -delete 2>/dev/null || true
+              mkdir -p "/dicom/db/${AE_TITLE}"
+              touch "/dicom/db/${AE_TITLE}/.indexed"
+            '
+          done
+          docker compose restart pacs-server pacs-server-2
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server healthy after cleanup"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: First test-store.sh run
+        run: docker compose exec -T test-client /tests/test-store.sh
+
+      - name: Wipe PACS storage on the host between runs
+        # Same marker trick as before to keep the second run starting from
+        # an empty PACS. See the comment on the first wipe step.
+        run: |
+          for svc in pacs-server pacs-server-2; do
+            docker compose exec -T "$svc" sh -c '
+              find /dicom/db -mindepth 1 -delete 2>/dev/null || true
+              mkdir -p "/dicom/db/${AE_TITLE}"
+              touch "/dicom/db/${AE_TITLE}/.indexed"
+            '
+          done
+          docker compose restart pacs-server pacs-server-2
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server healthy after cleanup"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Second test-store.sh run (must also pass)
+        run: docker compose exec -T test-client /tests/test-store.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs pacs-server || true
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  test-aggregator:
+    name: test-all.sh aggregator (green-on-failure guard)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults
+        run: cp env.default .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Wait for all SCP services to be healthy
+        run: |
+          services="pacs-server pacs-server-2 storescp-receiver mwl-server"
+          for i in $(seq 1 60); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
+              if [ "$status" != "healthy" ]; then
+                pending="$pending $svc=$status"
+              fi
+            done
+            if [ -z "$pending" ]; then
+              echo "All SCP services are healthy"
+              exit 0
+            fi
+            echo "waiting for SCP services (attempt $i/60, pending:$pending)"
+            sleep 2
+          done
+          echo "ERROR: not all SCP services became healthy in time"
+          for svc in $services; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
+            if [ "$status" != "healthy" ]; then
+              echo "=== $svc not healthy (status: $status); logs ==="
+              docker compose logs --tail=100 "$svc" || true
+            fi
+          done
+          exit 1
+
+      - name: Wipe PACS storage so the aggregator's C-STORE suite starts empty
+        # test-all.sh runs test-store.sh, which requires an empty PACS
+        # (ensure_clean_pacs) so its >= 3 study-count check is meaningful. The
+        # entrypoint indexes synthetic data on first boot, so wipe on the host
+        # and recreate the .indexed marker -- exactly like the isolated
+        # test-store jobs. See scripts/entrypoint.sh.
+        run: |
+          for svc in pacs-server pacs-server-2; do
+            docker compose exec -T "$svc" sh -c '
+              find /dicom/db -mindepth 1 -delete 2>/dev/null || true
+              mkdir -p "/dicom/db/${AE_TITLE}"
+              touch "/dicom/db/${AE_TITLE}/.indexed"
+            '
+          done
+          docker compose restart pacs-server pacs-server-2
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "pacs-server healthy after cleanup"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run the full aggregator and assert exit 0
+        # Exercises test-all.sh's own verdict logic (the SUITES_FAILED gate),
+        # which the per-script isolation jobs never cover. A green-on-failure
+        # regression in the aggregator would fail this job.
+        run: docker compose exec -T test-client /tests/test-all.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs pacs-server || true
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  test-adhoc-cmove:
+    name: ad-hoc C-MOVE delivery (EXTRA_PEERS e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env with an EXTRA_PEERS-only destination
+        run: |
+          cp env.default .env
+          # Register storescp-receiver under a NEW AE (ADHOC_SCP) that is NOT in
+          # the static HostTable, so a successful C-MOVE delivery proves the
+          # EXTRA_PEERS injection path works end-to-end (not the static peer).
+          sed -i 's/^EXTRA_PEERS=.*/EXTRA_PEERS=adhoc=ADHOC_SCP:storescp-receiver:11112/' .env
+          grep '^EXTRA_PEERS=adhoc=ADHOC_SCP:storescp-receiver:11112' .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Wait for all SCP services to be healthy
+        run: |
+          services="pacs-server pacs-server-2 storescp-receiver mwl-server"
+          for i in $(seq 1 60); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
+              if [ "$status" != "healthy" ]; then
+                pending="$pending $svc=$status"
+              fi
+            done
+            if [ -z "$pending" ]; then
+              echo "All SCP services are healthy"
+              exit 0
+            fi
+            echo "waiting for SCP services (attempt $i/60, pending:$pending)"
+            sleep 2
+          done
+          echo "ERROR: not all SCP services became healthy in time"
+          for svc in $services; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
+            if [ "$status" != "healthy" ]; then
+              echo "=== $svc not healthy (status: $status); logs ==="
+              docker compose logs --tail=100 "$svc" || true
+            fi
+          done
+          exit 1
+
+      - name: C-MOVE to the EXTRA_PEERS-only destination and verify arrival
+        run: docker compose exec -T -e ADHOC_DEST_AE=ADHOC_SCP test-client /tests/test-adhoc-cmove.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs pacs-server || true
+          docker compose logs storescp-receiver || true
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  test-tls-skip:
+    name: test-tls.sh skips cleanly on the cleartext stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults
+        run: cp env.default .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Assert test-tls.sh skips on the cleartext stack
+        # test-tls.sh checks TLS_ENABLED before touching any SCP, so the default
+        # (cleartext) stack must make it skip with exit 0. Proving the skip path
+        # still works guards against a silent regression in its guards. There is
+        # intentionally no TLS-serving job: the stock apt dcmtk is not
+        # OpenSSL-linked, so +tls cannot run on this base image.
+        run: |
+          out=$(docker compose exec -T test-client /tests/test-tls.sh)
+          echo "$out"
+          echo "$out" | grep -q "SKIP" || { echo "ERROR: expected test-tls.sh to SKIP on the cleartext stack"; exit 1; }
+          echo "OK: test-tls.sh skipped cleanly"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  # NOTE: the test-tls-skip job above exercises tests/test-tls.sh's skip path on
+  # the base image. There is intentionally no TLS-SERVING job: the stock Debian
+  # apt dcmtk package is not linked against OpenSSL, so dcmqrscp rejects +tls
+  # ("Unknown option +tls"). The TLS profile (docker-compose.tls.yml) and
+  # tests/test-tls.sh are ready for a TLS-capable (OpenSSL-linked) dcmtk image.

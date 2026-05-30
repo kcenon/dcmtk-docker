@@ -16,6 +16,13 @@ PACS2_AE="${PACS2_AE_TITLE:-DCMTK_PAC2}"
 MY_AE="${AE_TITLE:-TEST_SCU}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
 
+# ── Preamble: verify required SCPs are reachable ──────
+# Fail fast with a clear message if the environment is not ready, so the
+# script can be invoked standalone (in any order) instead of assuming a
+# previous test has already validated connectivity.
+ensure_scp_reachable "primary PACS"   "${PACS_HOST}"  "${PACS_PORT}" "${PACS_AE}"  "${MY_AE}" || exit 1
+ensure_scp_reachable "secondary PACS" "${PACS2_HOST}" "${PACS_PORT}" "${PACS2_AE}" "${MY_AE}" || exit 1
+
 # ── Ensure test data exists ───────────────────────────
 if [ ! -d "${TEST_DATA_DIR}/ct" ] || [ "$(find "${TEST_DATA_DIR}" -name '*.dcm' 2>/dev/null | wc -l)" -eq 0 ]; then
     if [ -x /usr/local/bin/generate-test-data.sh ]; then
@@ -26,6 +33,15 @@ if [ ! -d "${TEST_DATA_DIR}/ct" ] || [ "$(find "${TEST_DATA_DIR}" -name '*.dcm' 
         exit 1
     fi
 fi
+
+# ── Require both PACS to start empty (verification-only) ─────
+# Destructive cleanup of PACS storage runs on the host before this script
+# is invoked inside test-client (see `pacs.sh` and the test-isolation
+# workflow). Here we only verify the precondition: any leftover studies
+# would let the >= 3 study-count check below pass trivially on the second
+# run and mask regressions in the storescu -> dcmqrscp ingest path.
+ensure_clean_pacs "${PACS_HOST}"  "${PACS_PORT}" "${PACS_AE}"  "${MY_AE}" || exit 1
+ensure_clean_pacs "${PACS2_HOST}" "${PACS_PORT}" "${PACS2_AE}" "${MY_AE}" || exit 1
 
 CT_COUNT=$(find "${TEST_DATA_DIR}/ct" -name "*.dcm" 2>/dev/null | wc -l)
 MR_COUNT=$(find "${TEST_DATA_DIR}/mr" -name "*.dcm" 2>/dev/null | wc -l)
@@ -74,15 +90,15 @@ FIND_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
     -S "${PACS_HOST}" "${PACS_PORT}" \
     -k QueryRetrieveLevel=STUDY \
     -k PatientName="*" \
-    -k StudyInstanceUID 2>&1 || true)
+    -k StudyInstanceUID 2>&1 | tr -d '\0' || true)
 
-STUDY_COUNT=$(echo "${FIND_OUTPUT}" | grep -c "StudyInstanceUID" 2>/dev/null || echo "0")
-if [ "${STUDY_COUNT}" -ge 3 ]; then
-    print_pass "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= 3)"
-    print_verbose "Stored ${TOTAL_FILES} files across 3 patients"
+STUDY_COUNT=$(count_find_responses "${FIND_OUTPUT}" StudyInstanceUID)
+if [ "${STUDY_COUNT}" -ge "${MANIFEST_STUDY_COUNT}" ]; then
+    print_pass "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= ${MANIFEST_STUDY_COUNT})"
+    print_verbose "Stored ${TOTAL_FILES} files across ${MANIFEST_STUDY_COUNT} studies"
     TEST_PASSED=$((TEST_PASSED + 1))
 else
-    print_fail "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= 3)"
+    print_fail "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= ${MANIFEST_STUDY_COUNT})"
     TEST_FAILED=$((TEST_FAILED + 1))
 fi
 

@@ -1,15 +1,19 @@
-env_file:
-  - path: .env
-    required: false
-  - path: env.default
-    required: true
-
 services:
   # ── Primary PACS Server ────────────────────────────
   # Full PACS with C-ECHO, C-STORE, C-FIND, C-MOVE via dcmqrscp
   pacs-server:
     build: .
-    container_name: pacs-server
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
+    # Defence-in-depth on top of the non-root 'pacs' user: drop all Linux
+    # capabilities (the DICOM listener binds a high port, so none are needed)
+    # and forbid privilege escalation. A read_only root filesystem is deferred:
+    # the entrypoint renders the config to /tmp and several DCMTK tools use
+    # temp files, so it would need tmpfs mounts to be added safely.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
@@ -21,6 +25,14 @@ services:
       - MAX_BYTES_PER_STUDY=${MAX_BYTES_PER_STUDY:-1024mb}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - GENERATE_TEST_DATA=${GENERATE_TEST_DATA:-true}
+      - GENERATE_PIXEL_DATA=${GENERATE_PIXEL_DATA:-false}
+      - PIXEL_DATA_PROFILE=${PIXEL_DATA_PROFILE:-conservative}
+      - CT_PIXEL_ROWS=${CT_PIXEL_ROWS:-}
+      - CT_PIXEL_COLS=${CT_PIXEL_COLS:-}
+      - MR_PIXEL_ROWS=${MR_PIXEL_ROWS:-}
+      - MR_PIXEL_COLS=${MR_PIXEL_COLS:-}
+      - CR_PIXEL_ROWS=${CR_PIXEL_ROWS:-}
+      - CR_PIXEL_COLS=${CR_PIXEL_COLS:-}
       - TEST_DATA_DIR=/dicom/testdata
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
       # Peer configuration for HostTable
@@ -28,6 +40,8 @@ services:
       - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
       - TEST_SCU_AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary.cfg.template
+      # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
+      - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
       - "${PACS1_HOST_PORT:-11112}:11112"
     volumes:
@@ -36,7 +50,7 @@ services:
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD", "echoscu", "localhost", "11112"]
+      test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost 11112"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -47,7 +61,12 @@ services:
   # Second PACS instance for multi-PACS testing scenarios
   pacs-server-2:
     build: .
-    container_name: pacs-server-2
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
@@ -64,6 +83,8 @@ services:
       - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
       - TEST_SCU_AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-secondary.cfg.template
+      # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
+      - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
       - "${PACS2_HOST_PORT:-11113}:11112"
     volumes:
@@ -72,7 +93,7 @@ services:
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD", "echoscu", "localhost", "11112"]
+      test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost 11112"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -83,7 +104,12 @@ services:
   # Lightweight receiver for C-MOVE retrieval testing
   storescp-receiver:
     build: .
-    container_name: storescp-receiver
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - ROLE=storescp
       - AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
@@ -97,18 +123,58 @@ services:
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "11112"]
+      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 5s
     restart: unless-stopped
 
+  # ── Modality Worklist Server (wlmscpfs) ────────────
+  # Serves a Modality Worklist (findscu -W) built from the same fixture
+  # manifest as the Q/R data, so a modality sees the patients it will store.
+  mwl-server:
+    build: .
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      - ROLE=worklist
+      - AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
+      - WLM_AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
+      - WLM_STATION_AE=${WLM_STATION_AE:-MODALITY01}
+      - DICOM_PORT=11112
+      - WLM_DATA_DIR=/dicom/worklist
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
+    ports:
+      - "${WLM_HOST_PORT:-11115}:11112"
+    volumes:
+      - worklist-data:/dicom/worklist
+    networks:
+      - dicom-net
+    healthcheck:
+      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   # ── Test Client ────────────────────────────────────
   # Interactive container with all DCMTK SCU tools
   test-client:
     build: .
-    container_name: test-client
+    # The test-client generates synthetic data into the host-bind-mounted ./data
+    # (owned by the host user), so it runs as root to keep that path writable.
+    # The network-facing PACS and receiver services run as the non-root 'pacs'
+    # user; this helper has no published ports and only runs SCU tools.
+    user: root
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
     environment:
       - ROLE=test-client
       - AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
@@ -120,15 +186,38 @@ services:
       - STORESCP_HOST=storescp-receiver
       - STORESCP_AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
       - GENERATE_TEST_DATA=${GENERATE_TEST_DATA:-true}
+      - GENERATE_PIXEL_DATA=${GENERATE_PIXEL_DATA:-false}
+      - PIXEL_DATA_PROFILE=${PIXEL_DATA_PROFILE:-conservative}
+      - CT_PIXEL_ROWS=${CT_PIXEL_ROWS:-}
+      - CT_PIXEL_COLS=${CT_PIXEL_COLS:-}
+      - MR_PIXEL_ROWS=${MR_PIXEL_ROWS:-}
+      - MR_PIXEL_COLS=${MR_PIXEL_COLS:-}
+      - CR_PIXEL_ROWS=${CR_PIXEL_ROWS:-}
+      - CR_PIXEL_COLS=${CR_PIXEL_COLS:-}
       - TEST_DATA_DIR=/dicom/testdata
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
+      - STORESCP_STORAGE_DIR=/dicom/received
+      - WLM_HOST=mwl-server
+      - WLM_AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
+      - WLM_STATION_AE=${WLM_STATION_AE:-MODALITY01}
     volumes:
       - ./data:/dicom/testdata
       - ./tests:/tests:ro
+      # Mount the storescp-receiver storage so C-MOVE tests can clean
+      # incoming files between cases and verify the arrived instances
+      # (count + DICOM UID match) instead of relying on movescu exit
+      # codes alone. See issue #33.
+      - received-data:/dicom/received
     networks:
       - dicom-net
     depends_on:
       pacs-server:
+        condition: service_healthy
+      pacs-server-2:
+        condition: service_healthy
+      storescp-receiver:
+        condition: service_healthy
+      mwl-server:
         condition: service_healthy
 
 networks:
@@ -139,3 +228,4 @@ volumes:
   pacs-data:
   pacs2-data:
   received-data:
+  worklist-data:

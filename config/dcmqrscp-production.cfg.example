@@ -1,0 +1,66 @@
+#
+# ============================================================================
+# dcmqrscp configuration - Production-Safe Example
+# ============================================================================
+# This example demonstrates how to restrict DICOM access to a known set of
+# peers using HostTable + a named whitelist (here: "all_peers").
+#
+# Key difference from the test templates:
+#   - The AETable Peers entry uses the HostTable whitelist symbolic name
+#     ("all_peers") instead of the wildcard "ANY".
+#   - dcmqrscp will REJECT any association whose Calling AE Title does not
+#     match an entry mapped under the configured peer group.
+#
+# Usage:
+#   1. Copy this file to a non-template name (e.g., dcmqrscp-production.cfg).
+#   2. Replace the symbolic peer entries with the AE Titles, hostnames, and
+#      ports of YOUR real DICOM modalities and viewers.
+#   3. Replace the placeholder values (AE_TITLE, STORAGE_DIR, etc.) with
+#      concrete production values - this file is NOT processed by envsubst
+#      unless you wire it into your own entrypoint.
+#   4. Mount the resulting file into the container at the path expected by
+#      your entrypoint (default: /etc/dcmtk/dcmqrscp-primary.cfg.template).
+#
+# Security checklist before going live:
+#   - Run dcmqrscp behind a network boundary (firewall / private VLAN).
+#   - Use TLS (dcmqrscp --enable-tls ...) where supported.
+#   - Audit the HostTable so only known modalities are listed.
+#   - Rotate AE Titles if a peer is decommissioned.
+#   - Monitor dcmqrscp logs for rejected associations and alert on spikes.
+# ============================================================================
+
+# Global Configuration
+NetworkTCPPort  = 11112
+MaxPDUSize      = 16384
+MaxAssociations = 16
+
+# HostTable: defines KNOWN, AUTHORIZED DICOM peers.
+# Format: symbolic_name = (AETitle, hostname, port)
+#
+# Replace each entry below with a real modality / viewer / archive.
+# The "all_peers" line aggregates them into a single whitelist that the
+# AETable references by name.
+HostTable BEGIN
+  modality_ct1   = (CT_SCANNER_01,  ct1.hospital.example,         11112)
+  modality_mr1   = (MR_SCANNER_01,  mr1.hospital.example,         11112)
+  viewer_main    = (PACS_VIEWER,    viewer.hospital.example,      11112)
+  archive_dr     = (DR_ARCHIVE,     archive.dr.hospital.example,  11112)
+
+  all_peers      = modality_ct1, modality_mr1, viewer_main, archive_dr
+HostTable END
+
+# VendorTable: optional grouping by vendor or department.
+VendorTable BEGIN
+  "Approved Peers" = all_peers
+VendorTable END
+
+# AETable: defines storage areas for this SCP.
+# Format: AETitle StorageDirectory AccessMode (MaxStudies, MaxBytesPerStudy) Peers
+#
+# IMPORTANT: The final field is "all_peers" (the HostTable whitelist),
+# NOT "ANY". This is the substitution that converts the test template
+# into a production-safe configuration. Any SCU whose Calling AE Title
+# does not resolve through "all_peers" will be rejected.
+AETable BEGIN
+  PROD_PACS  /var/dicom/db/PROD_PACS  RW  (10000, 4096mb)  all_peers
+AETable END

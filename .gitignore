@@ -4,6 +4,9 @@
 # DICOM data (generated at runtime)
 data/dicom-output/
 data/received/
+data/ct/
+data/mr/
+data/cr/
 
 # Docker volumes
 volumes/

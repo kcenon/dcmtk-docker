@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # DCMTK PACS Test Environment - Entrypoint Script
 # Dispatches to the appropriate service based on the ROLE environment variable.
@@ -29,6 +29,7 @@ DCMTK_LOG_LEVEL=$(map_log_level)
 
 # ── Logging helpers ──────────────────────────────────
 log_info()  { echo "[entrypoint] INFO:  $*"; }
+log_warn()  { echo "[entrypoint] WARN:  $*" >&2; }
 log_error() { echo "[entrypoint] ERROR: $*" >&2; }
 
 # ── Generate test data ───────────────────────────────
@@ -59,17 +60,76 @@ start_pacs_server() {
         exit 1
     fi
 
+    # Inject ad-hoc C-MOVE destinations from EXTRA_PEERS (if any) into the
+    # rendered HostTable, so retrieval to an external listener does not require
+    # editing the template or rebuilding. See scripts/inject-extra-peers.sh.
+    if [ -n "${EXTRA_PEERS:-}" ] && [ -x /usr/local/bin/inject-extra-peers.sh ]; then
+        log_info "Injecting ad-hoc C-MOVE peers: ${EXTRA_PEERS}"
+        /usr/local/bin/inject-extra-peers.sh /tmp/dcmqrscp.cfg
+    fi
+
+    # Security check: warn if rendered config uses 'ANY' Peers
+    # (test default; not safe for production - see config/dcmqrscp-production.cfg.example)
+    if grep -Eq '^[[:space:]]*[^#].*[[:space:]]ANY[[:space:]]*$' /tmp/dcmqrscp.cfg; then
+        log_warn "dcmqrscp AETable uses 'ANY' Peers - any SCU may connect without AE Title verification."
+        log_warn "This is TEST-ONLY. For production, see config/dcmqrscp-production.cfg.example."
+    fi
+
     # Generate test data if enabled
     maybe_generate_test_data
 
-    # If test data was generated, register it with the PACS database
+    # If test data was generated, register it with the PACS database.
+    #
+    # Indexing is gated by a marker file at "${STORAGE_DIR}/${AE_TITLE}/.indexed"
+    # to avoid redundant work on every container restart. Source review of
+    # DCMTK shows that re-indexing the same SOP Instance UIDs does not grow
+    # index.dat unboundedly (duplicate records are detected and tombstone
+    # slots are reused). The marker is therefore a defensive optimization,
+    # not a correctness fix. To force re-indexing (e.g. after adding new
+    # test DICOM files), delete the marker file or wipe the storage volume.
+    # See docs/06_dcmqridx_behavior.md for the source-level analysis.
     if [ "${GENERATE_TEST_DATA}" = "true" ] && [ -d "${TEST_DATA_DIR}" ]; then
-        local dcm_count
-        dcm_count=$(find "${TEST_DATA_DIR}" -name "*.dcm" 2>/dev/null | wc -l)
-        if [ "$dcm_count" -gt 0 ]; then
-            log_info "Registering ${dcm_count} test DICOM files with PACS database..."
-            find "${TEST_DATA_DIR}" -name "*.dcm" -exec \
-                dcmqridx "${STORAGE_DIR}/${AE_TITLE}" {} + 2>/dev/null || true
+        local marker="${STORAGE_DIR}/${AE_TITLE}/.indexed"
+        if [ -f "$marker" ]; then
+            log_info "Skipping dcmqridx; marker present at ${marker} (delete to force re-index)"
+        else
+            local dcm_count
+            dcm_count=$(find "${TEST_DATA_DIR}" -name "*.dcm" 2>/dev/null | wc -l)
+            if [ "$dcm_count" -gt 0 ]; then
+                log_info "Registering ${dcm_count} test DICOM files with PACS database..."
+                if find "${TEST_DATA_DIR}" -name "*.dcm" -exec \
+                        dcmqridx "${STORAGE_DIR}/${AE_TITLE}" {} + 2>/dev/null; then
+                    touch "$marker"
+                    log_info "Indexing complete; marker created at ${marker}"
+                else
+                    log_warn "dcmqridx returned non-zero; marker not created (will retry next start)"
+                fi
+            fi
+        fi
+    fi
+
+    # TLS profile: serve over an authenticated secure connection. This requires a
+    # dcmqrscp built with OpenSSL (+tls). The stock Debian apt dcmtk package is
+    # NOT linked against OpenSSL, so we detect support at runtime and fall back to
+    # cleartext (with a clear warning) rather than crash-looping. Use a TLS-capable
+    # (source-built / OpenSSL-linked) dcmtk image to actually serve TLS.
+    if [ "${TLS_ENABLED:-false}" = "true" ]; then
+        if dcmqrscp --help 2>&1 | grep -q -- '--enable-tls'; then
+            local cert_dir="${TLS_CERT_DIR:-/dicom/certs}"
+            if [ -x /usr/local/bin/gen-certs.sh ]; then
+                /usr/local/bin/gen-certs.sh "${cert_dir}"
+            fi
+            log_info "Starting dcmqrscp with TLS on port ${DICOM_PORT}..."
+            exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" \
+                +tls "${cert_dir}/server-key.pem" "${cert_dir}/server-cert.pem" \
+                +cf "${cert_dir}/ca-cert.pem" \
+                -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"
+        else
+            log_error "TLS_ENABLED=true but this dcmqrscp build has no TLS support (+tls)."
+            log_error "The stock Debian apt dcmtk is not linked against OpenSSL. Use a TLS-capable"
+            log_error "(source-built / OpenSSL-linked) dcmtk image, or unset TLS_ENABLED for cleartext."
+            log_error "Refusing to start: a PACS asked to serve TLS must not silently fall back to plaintext."
+            exit 1
         fi
     fi
 
@@ -89,6 +149,7 @@ start_storescp() {
         --output-directory "${STORAGE_DIR}" \
         --aetitle "${AE_TITLE}" \
         --sort-on-study-uid prefix \
+        --filename-extension .dcm \
         "${DICOM_PORT}"
 }
 
@@ -102,6 +163,27 @@ start_test_client() {
     log_info "Test client ready. Available tools: echoscu, storescu, findscu, movescu, getscu"
     log_info "Container will stay alive. Use 'docker compose exec test-client <command>' to run tools."
     exec sleep infinity
+}
+
+# ── Role: worklist (wlmscpfs - Modality Worklist SCP) ─
+start_worklist() {
+    log_info "Starting Modality Worklist SCP: AE_TITLE=${AE_TITLE}, PORT=${DICOM_PORT}"
+
+    local wlm_data_dir="${WLM_DATA_DIR:-/dicom/worklist}"
+    mkdir -p "${wlm_data_dir}"
+
+    # Generate manifest-driven worklist items (and the mandatory lockfile) unless
+    # disabled. wlmscpfs serves items from <wlm_data_dir>/<CalledAETitle>/*.wl.
+    if [ "${GENERATE_WORKLIST:-true}" = "true" ] && [ -x /usr/local/bin/generate-worklist.sh ]; then
+        log_info "Generating worklist data..."
+        /usr/local/bin/generate-worklist.sh "${wlm_data_dir}"
+    fi
+
+    log_info "Starting wlmscpfs on port ${DICOM_PORT} (data: ${wlm_data_dir})..."
+    exec wlmscpfs --log-level "${DCMTK_LOG_LEVEL}" \
+        -dfp "${wlm_data_dir}" \
+        --disable-file-reject \
+        "${DICOM_PORT}"
 }
 
 # ── Role: custom ─────────────────────────────────────
@@ -123,12 +205,15 @@ case "${ROLE}" in
     test-client)
         start_test_client
         ;;
+    worklist)
+        start_worklist
+        ;;
     custom)
         start_custom "$@"
         ;;
     *)
         log_error "Unknown role: ${ROLE}"
-        log_error "Valid roles: pacs-server, storescp, test-client, custom"
+        log_error "Valid roles: pacs-server, storescp, test-client, worklist, custom"
         exit 1
         ;;
 esac

@@ -1,0 +1,52 @@
+#
+# ============================================================================
+# RESTRICTED MODE: AE Title whitelist enabled
+# ============================================================================
+# This template is the production-leaning sibling of
+# config/dcmqrscp-secondary.cfg.template. The only functional difference is
+# that the AETable Peers field uses the HostTable whitelist symbolic name
+# "all_peers" instead of the wildcard "ANY".
+#
+# Effect: dcmqrscp REJECTS any association whose Calling AE Title is not
+# listed in the HostTable below. Use this profile to exercise production-
+# like access control inside the test environment.
+#
+# How to activate (opt-in, see README "Restricted AE whitelist profile"):
+#   docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d
+#
+# For a production-grade example (real hostnames, TLS pointers, hardening
+# checklist) see config/dcmqrscp-production.cfg.example.
+# ============================================================================
+#
+# dcmqrscp configuration - Secondary PACS Server (restricted whitelist)
+# Processed by envsubst at container startup
+#
+
+# Global Configuration
+NetworkTCPPort  = ${DICOM_PORT}
+MaxPDUSize      = ${MAX_PDU_SIZE}
+MaxAssociations = ${MAX_ASSOCIATIONS}
+
+# HostTable: defines known DICOM peers for C-MOVE destinations
+# Format: symbolic_name = (AETitle, hostname, port)
+HostTable BEGIN
+test_client = (${TEST_SCU_AE_TITLE}, test-client, 11112)
+store_scp = (${STORESCP_AE_TITLE}, storescp-receiver, 11112)
+pacs1 = (${PACS1_AE_TITLE}, pacs-server, 11112)
+all_peers = test_client, store_scp, pacs1
+HostTable END
+
+# VendorTable: group peers by vendor/purpose
+VendorTable BEGIN
+"Test Peers" = all_peers
+VendorTable END
+
+# AETable: defines storage areas for this SCP
+# Format: AETitle StorageDirectory AccessMode (MaxStudies, MaxBytesPerStudy) Peers
+#
+# IMPORTANT: The final field is "all_peers" (HostTable whitelist), NOT "ANY".
+# Any SCU whose Calling AE Title does not resolve through "all_peers" will
+# be rejected.
+AETable BEGIN
+${AE_TITLE} ${STORAGE_DIR}/${AE_TITLE} RW (${MAX_STUDIES}, ${MAX_BYTES_PER_STUDY}) all_peers
+AETable END

@@ -18,8 +18,12 @@ Start a complete DICOM network with a single command.
 
 All DICOM operations (C-ECHO, C-STORE, C-FIND, C-MOVE) are tested automatically.
 
-> **Note:** The project works out of the box — `env.default` is used as fallback when
-> `.env` doesn't exist. Copy to `.env` only if you need custom values: `cp env.default .env`
+> **Note:** The project works out of the box. `docker-compose.yml` uses
+> `${VAR:-default}` interpolation, so every variable has a built-in fallback
+> even when `.env` is absent. `env.default` is a template that `./pacs.sh up`
+> copies to `.env` for customization; it is not read by Docker Compose
+> directly. Copy it to `.env` only if you need custom values:
+> `cp env.default .env`
 
 ## Architecture
 
@@ -51,10 +55,38 @@ Host Machine
 | pacs-server | `DCMTK_PACS` | 11112 | Primary PACS (C-ECHO, C-STORE, C-FIND, C-MOVE) | `dcmqrscp` |
 | pacs-server-2 | `DCMTK_PAC2` | 11113 | Secondary PACS for multi-PACS testing | `dcmqrscp` |
 | storescp-receiver | `STORE_SCP` | 11114 | C-MOVE destination / standalone receiver | `storescp` |
+| mwl-server | `DCMTK_WLM` | 11115 | Modality Worklist SCP (`findscu -W`) | `wlmscpfs` |
 | test-client | `TEST_SCU` | — | Interactive SCU tool container | `sleep infinity` |
 
 All services use a single Docker image (`debian:bookworm-slim` + DCMTK 3.6.7).
 The `ROLE` environment variable selects which service to run.
+
+## Capabilities & Conformance
+
+This is a **classic-DIMSE test PACS** built on DCMTK `dcmqrscp`. It is purpose-built
+for deterministic, isolated testing of DICOM network (DIMSE) clients on uncompressed
+data — not a drop-in replacement for a full clinical archive.
+
+| Capability | Status | Notes |
+|------------|:------:|-------|
+| C-ECHO (Verification) | ✅ | Used as the DICOM-native healthcheck |
+| C-STORE (Storage) | ✅ | Indexed into a real queryable `index.dat` archive |
+| C-FIND (Query) | ✅ | Patient Root + Study Root; STUDY/SERIES levels tested |
+| C-MOVE (Retrieve) | ✅ | Cross-node; destination AE must be in the HostTable |
+| C-GET (Retrieve) | ✅ | Enabled by default |
+| Uncompressed transfer syntaxes | ✅ | Implicit VR LE, Explicit VR LE, Explicit VR BE |
+| AE-title access control | ✅ | Opt-in restricted (whitelist) profile |
+| Non-root container | ✅ | Network-facing PACS/receiver services run as the unprivileged `pacs` user (the test-client helper runs as root for host-mounted writes) |
+| Compressed transfer syntaxes (JPEG / JPEG-LS / JPEG2000 / RLE) | ❌ | Stock Debian `dcmtk` ships no codec libraries |
+| DICOMweb (WADO-RS / QIDO-RS / STOW-RS) | ❌ | Not a DCMTK feature |
+| Modality Worklist (MWL) | ✅ | Served by `wlmscpfs` (`mwl-server`); query with `findscu -W` |
+| MPPS | ❌ | DCMTK ships no MPPS SCP — use Orthanc / dcm4chee |
+| Storage Commitment | ❌ | DCMTK ships no Storage-Commitment SCP — use dcm4chee |
+| TLS / secure transport | ⚠️ | TLS profile (`docker-compose.tls.yml`) is ready, but stock Debian apt `dcmtk` is not OpenSSL-linked (`+tls` unsupported); needs a TLS-capable dcmtk image |
+
+For DICOMweb, MPPS / Storage-Commitment workflows, or compressed pixel data,
+reach for [Orthanc](https://www.orthanc-server.com/) or
+[dcm4chee-arc-light](https://github.com/dcm4che/dcm4chee-arc-light).
 
 ## CLI Wrapper (`pacs.sh`)
 
@@ -65,13 +97,18 @@ A unified CLI script wraps all common operations:
 | `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`, `adhoc-peers`) |
+| `./pacs.sh add-peer <name> <ae> <host> <port>` | Register an ad-hoc C-MOVE destination and restart the PACS |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
 | `./pacs.sh reset` | Wipe volumes and restart fresh |
 | `./pacs.sh clean` | Remove all containers, images, and volumes |
-| `./pacs.sh echo [host] [port]` | Quick C-ECHO connectivity check |
+| `./pacs.sh clean-data [--dry-run]` | Remove host-side generated DICOM data (preserves `data/dicom-templates` fixtures) |
+| `./pacs.sh echo [host] [port] [called-ae] [calling-ae]` | Quick C-ECHO connectivity check |
+| `./pacs.sh version` | Show the dcmtk-docker version |
 | `./pacs.sh help` | Show usage with examples |
+
+> The `restricted-mode` suite is run via a compose overlay, not `pacs.sh test`; see [Restricted AE whitelist profile](#restricted-ae-whitelist-profile-opt-in).
 
 All `docker compose` commands still work directly if you prefer.
 
@@ -104,6 +141,9 @@ docker compose down -v
 ```bash
 # Quick check via pacs.sh (auto-detects host/container)
 ./pacs.sh echo localhost 11112
+
+# Check secondary PACS by overriding the Called AE Title
+./pacs.sh echo localhost 11113 DCMTK_PAC2
 
 # From test-client container
 docker compose exec test-client \
@@ -202,7 +242,7 @@ Any DICOM-capable application can connect to the PACS via the host-mapped ports:
 | Host | `<docker-host-ip>` or `localhost` |
 | Port | `11112` (primary), `11113` (secondary) |
 | Called AE Title | `DCMTK_PACS` or `DCMTK_PAC2` |
-| Calling AE Title | Any (Peers = ANY) |
+| Calling AE Title | Any (Peers = ANY in test config — see [Security Notes](#security-notes)) |
 
 For C-MOVE **from** the PACS **to** an external application, the application must be
 registered in the dcmqrscp HostTable. Edit `config/dcmqrscp-primary.cfg.template`
@@ -233,7 +273,57 @@ Then rebuild: `docker compose up -d --build pacs-server`
 ./pacs.sh test store    # Image archival
 ./pacs.sh test find     # Query
 ./pacs.sh test move     # Retrieval
+./pacs.sh test pixeldata  # PixelData smoke (opt-in, see below)
+./pacs.sh test transfer-syntax  # Uncompressed transfer-syntax matrix
+./pacs.sh test load-smoke # Operational load smoke (parallel C-STORE + C-FIND)
 ```
+
+#### Transfer syntax compatibility
+
+The synthetic data generator emits every instance as Explicit VR Little
+Endian. The `transfer-syntax` suite (`tests/test-transfer-syntax.sh`) takes
+that source instance and uses `dcmconv` to convert it to the three
+uncompressed syntaxes that DCMTK's default Debian package always accepts,
+then verifies `storescu` can negotiate each one against the primary PACS:
+
+| Label            | Transfer Syntax UID    | `dcmconv` flag |
+|------------------|------------------------|----------------|
+| explicit-vr-le   | 1.2.840.10008.1.2.1    | `+te`          |
+| implicit-vr-le   | 1.2.840.10008.1.2      | `+ti`          |
+| explicit-vr-be   | 1.2.840.10008.1.2.2    | `+tb`          |
+
+Compressed syntaxes (JPEG / JPEG-LS / RLE / JPEG2000) require codec
+libraries that are not part of the upstream Debian `dcmtk` package; the
+suite intentionally skips them. To extend coverage once a codec-enabled
+image variant ships, add the matching `dcmconv` flag (`+ej`, `+er`, ...)
+and target UID to the matrix in `tests/test-transfer-syntax.sh`.
+
+### Load Smoke Testing
+
+The `load-smoke` suite drives the PACS with parallel `storescu` workers
+and a concurrent `findscu` probe, exercising the `MAX_ASSOCIATIONS`
+ceiling, association cleanup, and mixed store/query behaviour that the
+functional suites do not cover.
+
+```bash
+# Defaults are conservative so the suite stays inside ~1-2 min of CI budget
+./pacs.sh test load-smoke
+
+# Probe a heavier mix (e.g. saturate the default MAX_ASSOCIATIONS=16 ceiling)
+LOAD_SMOKE_PARALLEL=4 LOAD_SMOKE_REPEAT=3 ./pacs.sh test load-smoke
+```
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `LOAD_SMOKE_PARALLEL` | `2` | Number of parallel `storescu` workers |
+| `LOAD_SMOKE_REPEAT` | `2` | Iterations of `storescu` per worker |
+| `LOAD_SMOKE_TIMEOUT` | `60` | Per-association timeout in seconds |
+| `LOAD_SMOKE_FIND_REPS` | `5` | Concurrent `findscu` iterations (0 disables the probe) |
+
+The suite passes when at least half of the parallel workers complete and
+the post-load study count is at or above the pre-load baseline. Failed
+worker logs are emitted to stderr so the offending association can be
+attributed back to its worker.
 
 ### Test Data
 
@@ -248,12 +338,128 @@ Synthetic DICOM files are generated automatically at first startup:
 To add custom DICOM files, place them in the `data/` directory.
 They will be available in the test-client at `/dicom/testdata/`.
 
-To regenerate test data, remove existing files and restart:
+#### Source fixtures vs generated artifacts
+
+The `data/` directory mixes two kinds of content. Only the source fixtures are
+tracked in git; generated artifacts are ignored via `.gitignore` and can be
+wiped safely.
+
+| Path | Kind | Tracked | Notes |
+|------|------|---------|-------|
+| `data/dicom-templates/` | Source fixture | Yes | `*.dump` templates consumed by the generator; never delete |
+| `data/ct/`, `data/mr/`, `data/cr/` | Generated | No | Synthetic DICOM written on first `./pacs.sh up` |
+
+#### Test-data manifest (single source of truth)
+
+The identity of the synthetic dataset — the OID root, every study/series UID,
+the expected instance counts, and the patient demographics — lives in one file:
+`scripts/fixture-manifest.sh`. Both the generator (`scripts/generate-test-data.sh`)
+and the test scripts (via `tests/test-helpers.sh`) source it, so no magic UID or
+count is duplicated where it could drift out of sync.
+
+**Pointing the suite at an external (non-DCMTK) PACS.** Every query key and
+assertion reads from the manifest, so you can validate a third-party archive
+without editing a test:
+
+1. Set `OID_ROOT` to a value that will not collide with the target's data
+   (e.g. `OID_ROOT=1.2.3.myorg.test`).
+2. Generate the dataset (`scripts/generate-test-data.sh`) and load it into the
+   target PACS with `storescu`.
+3. Point the test scripts at the target via the `PACS_HOST` / `PACS_PORT` /
+   `PACS_AE_TITLE` environment variables and run them — the assertions follow
+   `OID_ROOT` automatically.
+| `data/dicom-output/`, `data/received/` | Generated | No | Test runtime artifacts |
+
+To regenerate test data, remove the generated directories and restart:
 
 ```bash
-rm -rf data/ct data/mr data/cr
+./pacs.sh clean-data            # remove only generated artifacts
 docker compose restart test-client
 ```
+
+`./pacs.sh clean-data --dry-run` prints the paths it would remove without
+touching the filesystem. Source fixtures in `data/dicom-templates/` are
+always preserved.
+
+#### Synthetic PixelData (optional)
+
+By default, generated files carry only metadata (Patient/Study/Series/Image/SOP modules)
+— enough to exercise the DICOM **network layer** (C-STORE, C-FIND, C-MOVE) but not
+the **image pipeline** (decode, window/level, render). To make the synthetic files
+usable by viewers and rendering pipelines, set `GENERATE_PIXEL_DATA=true`:
+
+```bash
+# Wipe existing test data and re-generate with PixelData embedded
+rm -rf data/ct data/mr data/cr
+GENERATE_PIXEL_DATA=true docker compose up -d --force-recreate pacs-server
+```
+
+When enabled, every CT/MR/CR instance gains a **modality-realistic** Image Pixel
+Module (`Rows`, `Columns`, `BitsAllocated`, `BitsStored`, `HighBit`,
+`PixelRepresentation`, `SamplesPerPixel`, `PhotometricInterpretation`), a
+modality-appropriate display window, and a deterministic synthetic
+`(7FE0,0010) OW` buffer:
+
+| Modality | Rows × Cols (conservative) | Rows × Cols (realistic) | BitsStored | PixelRep | Pattern | Extras |
+|----------|---------------------------|--------------------------|------------|----------|---------|--------|
+| CT       | 128 × 128                 | 512 × 512                | 16         | 1 (signed)   | 7-band signed Hounsfield ramp (-1000..1000)        | RescaleIntercept/Slope/Type, W/L 400/40 |
+| MR       | 128 × 128                 | 256 × 256                | 12         | 0 (unsigned) | 4-band intensity ramp (CSF .. fat)                  | W/L 4096/2048                            |
+| CR       | 224 × 224                 | 1024 × 1024              | 14         | 0 (unsigned) | Chest silhouette (thorax + lung fields + spine)     | W/L 16383/8192, PresentationLUTShape=IDENTITY |
+
+Switch profile or override individual modalities via env vars:
+
+```bash
+# Switch all three modalities to realistic dimensions
+PIXEL_DATA_PROFILE=realistic GENERATE_PIXEL_DATA=true \
+    docker compose up -d --force-recreate pacs-server
+
+# Override one modality (e.g. CR) without touching the others
+GENERATE_PIXEL_DATA=true CR_PIXEL_ROWS=512 CR_PIXEL_COLS=512 \
+    docker compose up -d --force-recreate pacs-server
+```
+
+Verify with `dcmdump`:
+
+```bash
+docker compose exec test-client dcmdump /dicom/testdata/ct/ct_pat001_1.dcm | grep -E 'PixelData|Rows|Columns'
+```
+
+A smoke test that runs `dcm2pnm` against a generated file is included as
+`tests/test-pixeldata.sh` (auto-skipped when `GENERATE_PIXEL_DATA` is unset).
+Run it explicitly through the `pacs.sh` CLI once test data has been generated
+with PixelData embedded:
+
+```bash
+# Wipe stale data, regenerate with conservative profile (default), run smoke test
+rm -rf data/ct data/mr data/cr
+GENERATE_PIXEL_DATA=true docker compose up -d --force-recreate pacs-server test-client
+GENERATE_PIXEL_DATA=true ./pacs.sh test pixeldata
+
+# Same with the realistic profile (larger frames, higher memory/CPU)
+rm -rf data/ct data/mr data/cr
+PIXEL_DATA_PROFILE=realistic GENERATE_PIXEL_DATA=true \
+    docker compose up -d --force-recreate pacs-server test-client
+GENERATE_PIXEL_DATA=true PIXEL_DATA_PROFILE=realistic \
+    ./pacs.sh test pixeldata
+```
+
+When `GENERATE_PIXEL_DATA` is left unset, `./pacs.sh test pixeldata` runs the
+script which prints a `SKIP` line and exits 0 — useful for confirming the CLI
+wiring without regenerating any data. CI currently exercises the conservative
+profile only; the realistic profile remains an opt-in local check.
+
+Re-generating PixelData requires wiping the per-modality `data/ct`, `data/mr`,
+and `data/cr` directories so the test-client recreates them on next start. The
+PACS storage volume also caches a `<storage>/<AE_TITLE>/.indexed` marker (see
+note below) — delete it whenever the underlying instances change so the server
+re-indexes them.
+
+> **Note:** The `pacs-server` indexes test DICOM files into its database on
+> first startup and writes a marker file at `<storage>/<AE_TITLE>/.indexed`
+> to skip re-indexing on subsequent restarts. After adding new DICOM files
+> to the storage area, delete the marker (or wipe the storage volume) to
+> force a re-index. See [docs/06_dcmqridx_behavior.md](docs/06_dcmqridx_behavior.md)
+> for details on the underlying `dcmqridx` semantics.
 
 ## Configuration
 
@@ -282,6 +488,11 @@ cp env.default .env
 | `MAX_BYTES_PER_STUDY` | `1024mb` | Maximum bytes per study |
 | `LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
 | `GENERATE_TEST_DATA` | `true` | Generate synthetic data on startup |
+| `GENERATE_PIXEL_DATA` | `false` | Embed modality-realistic synthetic PixelData in generated files |
+| `PIXEL_DATA_PROFILE` | `conservative` | `conservative` (CT 128, MR 128, CR 224) or `realistic` (CT 512, MR 256, CR 1024) |
+| `CT_PIXEL_ROWS` / `CT_PIXEL_COLS` | (profile default) | Override CT dimensions independently of the profile |
+| `MR_PIXEL_ROWS` / `MR_PIXEL_COLS` | (profile default) | Override MR dimensions independently of the profile |
+| `CR_PIXEL_ROWS` / `CR_PIXEL_COLS` | (profile default) | Override CR dimensions independently of the profile |
 | `OID_ROOT` | `1.2.826.0.1.3680043.8.499` | OID root for test UIDs |
 
 ### dcmqrscp Configuration
@@ -297,23 +508,128 @@ Key sections:
 - **AETable**: Defines storage areas, access mode, and capacity limits
 - **Global**: Network port, PDU size, max associations
 
+## Security Notes
+
+**The default configuration shipped in this repository is intended for
+isolated test environments only and is NOT safe for production use.**
+
+### Default behavior: `ANY` Peers
+
+Both `config/dcmqrscp-primary.cfg.template` and
+`config/dcmqrscp-secondary.cfg.template` set the AETable Peers field to
+`ANY`:
+
+```
+AETable BEGIN
+  ${AE_TITLE}  ${STORAGE_DIR}/${AE_TITLE}  RW  (...)  ANY
+AETable END
+```
+
+`ANY` instructs `dcmqrscp` to accept associations from **any** DICOM SCU
+on the network without verifying the Calling AE Title. This is convenient
+for local integration testing but exposes the PACS to:
+
+- Unauthenticated C-STORE from arbitrary peers (data poisoning, malware
+  delivery via DICOM payloads).
+- Unauthenticated C-FIND / C-MOVE that may exfiltrate PHI (Protected
+  Health Information).
+- Compliance violations under HIPAA, GDPR, and the Korean Personal
+  Information Protection Act, all of which require restricting access to
+  known callers.
+
+### Production-safe alternative
+
+For any deployment that touches a non-isolated network, replace `ANY`
+with a `HostTable` + `all_peers` whitelist that names exactly which AE
+Titles are allowed to connect. A complete, annotated example is provided
+at:
+
+```
+config/dcmqrscp-production.cfg.example
+```
+
+That file:
+
+1. Lists each modality / viewer / archive explicitly in `HostTable`.
+2. Aggregates them under a symbolic name (`all_peers`).
+3. References that name in the `AETable` Peers field instead of `ANY`.
+
+### Additional hardening
+
+Even with a peer whitelist, a production deployment should add:
+
+- **Network isolation**: Run `dcmqrscp` behind a firewall or on a private
+  VLAN. DICOM is not encrypted by default.
+- **TLS**: Use `dcmqrscp --enable-tls` (or a TLS-terminating proxy) to
+  protect data in transit.
+- **Audit logging**: Set `LOG_LEVEL=info` (or `debug` during incident
+  triage) and forward `dcmqrscp` logs to a central log store. Alert on
+  rejected associations.
+- **Access reviews**: Periodically audit the HostTable; remove
+  decommissioned peers and rotate AE Titles when needed.
+
+### Restricted AE whitelist profile (opt-in)
+
+For test runs that need to exercise production-like access control
+without leaving the repo, the project ships a second pair of dcmqrscp
+config templates wired to the `all_peers` whitelist:
+
+| Mode | Template (Primary) | Template (Secondary) | Peers field |
+|------|--------------------|----------------------|-------------|
+| `test` (default) | `dcmqrscp-primary.cfg.template` | `dcmqrscp-secondary.cfg.template` | `ANY` |
+| `restricted` (opt-in) | `dcmqrscp-primary-restricted.cfg.template` | `dcmqrscp-secondary-restricted.cfg.template` | `all_peers` |
+
+The `restricted` profile keeps the same HostTable entries used by the
+test suite (`test_client`, `store_scp`, sibling PACS), so the default
+test data path still works. Any Calling AE Title outside that list is
+rejected at association setup.
+
+```bash
+# Start the stack in restricted (whitelist) mode
+docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d
+
+# Run the negative tests that assert unknown callers are rejected
+docker compose exec test-client bash /tests/test-restricted-mode.sh
+
+# Return to the default (test) mode
+docker compose down
+docker compose up -d
+```
+
+`./pacs.sh up` continues to launch the default `test` mode unchanged;
+restricted mode is purely an opt-in compose override (see
+`docker-compose.restricted.yml`).
+
 ## Project Structure
 
 ```
 dcmtk_docker/
 ├── pacs.sh                             # CLI wrapper (./pacs.sh help)
-├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK
-├── docker-compose.yml                  # 4 services, 1 network, 3 volumes
+├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK (non-root)
+├── docker-compose.yml                  # 5 services, 1 network, 4 volumes
+├── docker-compose.restricted.yml       # Overlay: AE-whitelist (restricted) mode
+├── docker-compose.tls.yml              # Overlay: secure DICOM (TLS) mode
 ├── env.default                         # Default environment values (copy to .env)
+├── VERSION                             # Project version (single source of truth)
+├── CHANGELOG.md                        # Release history (Keep a Changelog)
+├── LICENSE                             # MIT license
 ├── .dockerignore                       # Build context exclusions
 ├── README.md                           # This file
 ├── config/
-│   ├── dcmqrscp-primary.cfg.template   # Primary PACS config template
-│   └── dcmqrscp-secondary.cfg.template # Secondary PACS config template
+│   ├── dcmqrscp-primary.cfg.template              # Primary PACS config template
+│   ├── dcmqrscp-secondary.cfg.template            # Secondary PACS config template
+│   ├── dcmqrscp-primary-restricted.cfg.template   # Primary, AE-whitelist variant
+│   ├── dcmqrscp-secondary-restricted.cfg.template # Secondary, AE-whitelist variant
+│   └── dcmqrscp-production.cfg.example            # Production-safe reference config
 ├── scripts/
 │   ├── entrypoint.sh                   # Role-based startup dispatcher
+│   ├── fixture-manifest.sh             # Shared fixture identity (SSOT)
+│   ├── gen-certs.sh                    # Self-signed TLS test certificates
 │   ├── generate-test-data.sh           # Synthetic DICOM generation
-│   └── wait-for-pacs.sh               # Readiness polling
+│   ├── generate-worklist.sh            # Modality Worklist (.wl) generation
+│   ├── inject-extra-peers.sh           # Ad-hoc C-MOVE HostTable injection
+│   ├── pixel-data-profile.sh           # Shared PixelData profile defaults
+│   └── wait-for-pacs.sh                # Readiness polling
 ├── data/
 │   └── dicom-templates/                # dump2dcm reference templates
 │       ├── ct-template.dump
@@ -324,13 +640,22 @@ dcmtk_docker/
 │   ├── test-store.sh                   # C-STORE tests
 │   ├── test-find.sh                    # C-FIND tests
 │   ├── test-move.sh                    # C-MOVE tests
+│   ├── test-pixeldata.sh               # PixelData smoke tests
+│   ├── test-transfer-syntax.sh         # Transfer-syntax compatibility tests
+│   ├── test-load-smoke.sh              # Operational load smoke tests
+│   ├── test-restricted-mode.sh         # AE-whitelist rejection tests
+│   ├── test-worklist.sh                # Modality Worklist (findscu -W) tests
+│   ├── test-adhoc-peers.sh             # Ad-hoc C-MOVE peer injection tests
+│   ├── test-tls.sh                     # TLS secure-transport tests
+│   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
 └── docs/
     ├── 01_research_dcmtk_dicom.md
     ├── 02_research_docker_approaches.md
     ├── 03_architecture_design.md
     ├── 04_work_plan.md
-    └── 05_usage_guide.md
+    ├── 05_usage_guide.md
+    └── 06_dcmqridx_behavior.md
 ```
 
 ## Troubleshooting
@@ -338,7 +663,9 @@ dcmtk_docker/
 ### "Association rejected" / "Connection refused"
 
 1. **Check the service is running**: `./pacs.sh status` — all services should show "healthy"
-2. **Check the AE Title**: DICOM AE Titles are case-sensitive. Use exactly `DCMTK_PACS`, not `dcmtk_pacs`
+2. **Check the AE Title**: DICOM AE Titles are case-sensitive. Use exactly `DCMTK_PACS`, not `dcmtk_pacs`.
+   The PACS healthcheck issues `echoscu -aec ${AE_TITLE}` against itself, so a container will be marked
+   `unhealthy` if the configured `AE_TITLE` does not match what `dcmqrscp` actually loaded.
 3. **Check the port**: All containers listen on internal port `11112`. Host ports differ (11112, 11113, 11114)
 4. **Check the network**: Services must be on the same Docker network (`dicom-net`)
 
@@ -349,8 +676,8 @@ dcmtk_docker/
 # Check PACS logs
 ./pacs.sh logs pacs-server
 
-# Test TCP connectivity
-docker compose exec test-client nc -zv pacs-server 11112
+# Test DICOM connectivity
+docker compose exec test-client echoscu -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112
 ```
 
 ### C-MOVE fails / "No matching destination"
@@ -358,7 +685,7 @@ docker compose exec test-client nc -zv pacs-server 11112
 C-MOVE requires the destination AE to be registered in the PACS HostTable.
 
 1. **Check the HostTable**: `docker compose exec pacs-server cat /tmp/dcmqrscp.cfg`
-2. **Verify the destination is reachable**: `docker compose exec test-client echoscu storescp-receiver 11112`
+2. **Verify the destination is reachable**: `docker compose exec test-client echoscu -aet TEST_SCU -aec STORE_SCP storescp-receiver 11112`
 3. **Destination AE must match**: The `-aem` value in `movescu` must match a HostTable entry
 
 ### "No such SOP Class" / Transfer syntax errors
@@ -453,4 +780,4 @@ docker compose exec test-client dcmdump +P PatientName +P StudyInstanceUID \
 
 ## License
 
-MIT
+Released under the MIT License. See [LICENSE](LICENSE) for the full text.
