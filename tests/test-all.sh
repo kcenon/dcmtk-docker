@@ -38,6 +38,11 @@ PACS_AE="${PACS_AE_TITLE:-DCMTK_PACS}"
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 TOTAL_TESTS=0
+# Process-level failures: a suite that aborts non-zero (e.g. a set -e mid-suite
+# abort or an unreachable-SCP preamble) without printing any [FAIL] marker would
+# otherwise leave TOTAL_FAILED at 0 and be masked as a pass. Tracked separately
+# from the parsed [PASS]/[FAIL] counts and folded into the final verdict.
+SUITES_FAILED=0
 SUITE_RESULTS=""
 
 # ── Banner ────────────────────────────────────────────
@@ -78,7 +83,10 @@ run_suite() {
     local script="$2"
 
     if [ ! -f "${script}" ]; then
-        printf "${C_RED}[SKIP]${C_RESET} %s: script not found (%s)\n" "${name}" "${script}"
+        # A missing suite is a regression, not a benign skip: count it so the
+        # aggregate fails rather than silently dropping coverage.
+        printf "${C_RED}[FAIL]${C_RESET} %s: script not found (%s)\n" "${name}" "${script}"
+        SUITES_FAILED=$((SUITES_FAILED + 1))
         return
     fi
 
@@ -109,7 +117,10 @@ run_suite() {
     if [ "${exit_code}" -eq 0 ]; then
         SUITE_RESULTS="${SUITE_RESULTS}$(printf "  ${C_GREEN}[PASS]${C_RESET} %s: %d/%d passed\n" "${name}" "${passed}" "${total}")\n"
     else
-        SUITE_RESULTS="${SUITE_RESULTS}$(printf "  ${C_RED}[FAIL]${C_RESET} %s: %d/%d passed, %d failed\n" "${name}" "${passed}" "${total}" "${failed}")\n"
+        # Record the process-level failure even if the suite printed no [FAIL]
+        # markers (e.g. it aborted under set -e before any assertion ran).
+        SUITE_RESULTS="${SUITE_RESULTS}$(printf "  ${C_RED}[FAIL]${C_RESET} %s: %d/%d passed, %d failed (exit %d)\n" "${name}" "${passed}" "${total}" "${failed}" "${exit_code}")\n"
+        SUITES_FAILED=$((SUITES_FAILED + 1))
     fi
 }
 
@@ -134,11 +145,18 @@ if [ "${TOTAL_FAILED}" -gt 0 ]; then
     printf ", ${C_RED}%d failed${C_RESET}" "${TOTAL_FAILED}"
 fi
 echo ""
+if [ "${SUITES_FAILED}" -gt 0 ]; then
+    printf "  ${C_RED}Suites aborted/failed at the process level: %d${C_RESET}\n" "${SUITES_FAILED}"
+fi
 printf "${C_BOLD}========================================${C_RESET}\n"
 echo ""
 
-if [ "${TOTAL_FAILED}" -gt 0 ]; then
-    printf "${C_RED}RESULT: FAILED${C_RESET}\n"
+if [ "${TOTAL_FAILED}" -gt 0 ] || [ "${SUITES_FAILED}" -gt 0 ]; then
+    printf "${C_RED}RESULT: FAILED${C_RESET}"
+    if [ "${SUITES_FAILED}" -gt 0 ]; then
+        printf "${C_RED} (%d suite(s) aborted or failed at the process level)${C_RESET}" "${SUITES_FAILED}"
+    fi
+    printf "\n"
     exit 1
 else
     printf "${C_GREEN}RESULT: ALL TESTS PASSED${C_RESET}\n"
