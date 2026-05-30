@@ -27,7 +27,7 @@ RUN groupadd -g 10001 pacs \
     && useradd -u 10001 -g pacs -d /dicom -s /usr/sbin/nologin pacs
 
 # Create required directories
-RUN mkdir -p /dicom/db /dicom/testdata /dicom/received /etc/dcmtk
+RUN mkdir -p /dicom/db /dicom/testdata /dicom/received /dicom/worklist /etc/dcmtk
 
 # Copy configuration templates
 COPY config/ /etc/dcmtk/

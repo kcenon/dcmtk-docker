@@ -132,6 +132,27 @@ start_test_client() {
     exec sleep infinity
 }
 
+# ── Role: worklist (wlmscpfs - Modality Worklist SCP) ─
+start_worklist() {
+    log_info "Starting Modality Worklist SCP: AE_TITLE=${AE_TITLE}, PORT=${DICOM_PORT}"
+
+    local wlm_data_dir="${WLM_DATA_DIR:-/dicom/worklist}"
+    mkdir -p "${wlm_data_dir}"
+
+    # Generate manifest-driven worklist items (and the mandatory lockfile) unless
+    # disabled. wlmscpfs serves items from <wlm_data_dir>/<CalledAETitle>/*.wl.
+    if [ "${GENERATE_WORKLIST:-true}" = "true" ] && [ -x /usr/local/bin/generate-worklist.sh ]; then
+        log_info "Generating worklist data..."
+        /usr/local/bin/generate-worklist.sh "${wlm_data_dir}"
+    fi
+
+    log_info "Starting wlmscpfs on port ${DICOM_PORT} (data: ${wlm_data_dir})..."
+    exec wlmscpfs --log-level "${DCMTK_LOG_LEVEL}" \
+        -dfp "${wlm_data_dir}" \
+        --disable-file-reject \
+        "${DICOM_PORT}"
+}
+
 # ── Role: custom ─────────────────────────────────────
 start_custom() {
     log_info "Custom mode: executing command: $*"
@@ -151,12 +172,15 @@ case "${ROLE}" in
     test-client)
         start_test_client
         ;;
+    worklist)
+        start_worklist
+        ;;
     custom)
         start_custom "$@"
         ;;
     *)
         log_error "Unknown role: ${ROLE}"
-        log_error "Valid roles: pacs-server, storescp, test-client, custom"
+        log_error "Valid roles: pacs-server, storescp, test-client, worklist, custom"
         exit 1
         ;;
 esac

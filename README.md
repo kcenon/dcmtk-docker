@@ -55,6 +55,7 @@ Host Machine
 | pacs-server | `DCMTK_PACS` | 11112 | Primary PACS (C-ECHO, C-STORE, C-FIND, C-MOVE) | `dcmqrscp` |
 | pacs-server-2 | `DCMTK_PAC2` | 11113 | Secondary PACS for multi-PACS testing | `dcmqrscp` |
 | storescp-receiver | `STORE_SCP` | 11114 | C-MOVE destination / standalone receiver | `storescp` |
+| mwl-server | `DCMTK_WLM` | 11115 | Modality Worklist SCP (`findscu -W`) | `wlmscpfs` |
 | test-client | `TEST_SCU` | — | Interactive SCU tool container | `sleep infinity` |
 
 All services use a single Docker image (`debian:bookworm-slim` + DCMTK 3.6.7).
@@ -78,13 +79,13 @@ data — not a drop-in replacement for a full clinical archive.
 | Non-root container | ✅ | Network-facing PACS/receiver services run as the unprivileged `pacs` user (the test-client helper runs as root for host-mounted writes) |
 | Compressed transfer syntaxes (JPEG / JPEG-LS / JPEG2000 / RLE) | ❌ | Stock Debian `dcmtk` ships no codec libraries |
 | DICOMweb (WADO-RS / QIDO-RS / STOW-RS) | ❌ | Not a DCMTK feature |
-| Modality Worklist (MWL) | ❌ | Not served by `dcmqrscp` (planned) |
-| MPPS | ❌ | DCMTK ships no MPPS SCP |
-| Storage Commitment | ❌ | No N-ACTION / N-EVENT-REPORT SCP |
+| Modality Worklist (MWL) | ✅ | Served by `wlmscpfs` (`mwl-server`); query with `findscu -W` |
+| MPPS | ❌ | DCMTK ships no MPPS SCP — use Orthanc / dcm4chee |
+| Storage Commitment | ❌ | DCMTK ships no Storage-Commitment SCP — use dcm4chee |
 | TLS / secure transport | ❌ | Running stack is cleartext only (planned) |
 
-For DICOMweb, worklist / MPPS / Storage-Commitment workflows, compressed pixel data,
-or TLS, reach for [Orthanc](https://www.orthanc-server.com/) or
+For DICOMweb, MPPS / Storage-Commitment workflows, compressed pixel data, or TLS,
+reach for [Orthanc](https://www.orthanc-server.com/) or
 [dcm4chee-arc-light](https://github.com/dcm4che/dcm4chee-arc-light).
 
 ## CLI Wrapper (`pacs.sh`)
@@ -96,7 +97,7 @@ A unified CLI script wraps all common operations:
 | `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`) |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
 | `./pacs.sh reset` | Wipe volumes and restart fresh |
@@ -620,7 +621,9 @@ dcmtk_docker/
 │   └── dcmqrscp-production.cfg.example            # Production-safe reference config
 ├── scripts/
 │   ├── entrypoint.sh                   # Role-based startup dispatcher
+│   ├── fixture-manifest.sh             # Shared fixture identity (SSOT)
 │   ├── generate-test-data.sh           # Synthetic DICOM generation
+│   ├── generate-worklist.sh            # Modality Worklist (.wl) generation
 │   ├── pixel-data-profile.sh           # Shared PixelData profile defaults
 │   └── wait-for-pacs.sh                # Readiness polling
 ├── data/
@@ -637,6 +640,7 @@ dcmtk_docker/
 │   ├── test-transfer-syntax.sh         # Transfer-syntax compatibility tests
 │   ├── test-load-smoke.sh              # Operational load smoke tests
 │   ├── test-restricted-mode.sh         # AE-whitelist rejection tests
+│   ├── test-worklist.sh                # Modality Worklist (findscu -W) tests
 │   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
 └── docs/

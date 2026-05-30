@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Conformance / Capabilities table in the README documenting supported vs unsupported DICOM services (DICOMweb, MWL, MPPS, Storage Commitment, TLS, compressed transfer syntaxes).
 - Per-service memory and CPU limits in `docker-compose.yml`.
 - `scripts/fixture-manifest.sh` — a single source of truth for the synthetic fixture identity (OID root, study/series UIDs, instance counts, patient demographics). The data generator and every test script source it, so the suite can be retargeted at an external / non-DCMTK PACS by overriding `OID_ROOT` without editing any assertion. README documents the external-PACS procedure.
+- Modality Worklist (MWL) support: a `worklist` role running `wlmscpfs`, a new `mwl-server` service (AE `DCMTK_WLM`, host port 11115), manifest-driven `.wl` worklist items (`scripts/generate-worklist.sh`) that share patient identity with the Q/R data, and `tests/test-worklist.sh` (`findscu -W`) wired into `test-all.sh` and the CI matrix. MPPS and Storage Commitment remain out of scope (DCMTK ships no such SCP).
 
 ### Changed
 - Network-facing PACS and receiver services now run as a dedicated non-root user (`pacs`, uid 10001) instead of `root`. The test-client helper (no published ports) stays root so it can write synthetic data into the host-bind-mounted `./data`.
