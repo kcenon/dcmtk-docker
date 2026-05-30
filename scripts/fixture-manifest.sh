@@ -1,4 +1,6 @@
 #!/bin/bash
+# Sourced by other scripts; intentionally no `set -euo pipefail` here so it does
+# not alter the caller's shell options.
 # ============================================================================
 # Synthetic test-fixture manifest - SINGLE SOURCE OF TRUTH
 # ============================================================================

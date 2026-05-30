@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Generate Modality Worklist (.wl) files from the fixture manifest.
 # Usage: generate-worklist.sh [output_dir]
@@ -80,7 +80,7 @@ create_worklist_item() {
 (fffe,e0dd)
 DUMP
 
-    dump2dcm "${dump}" "${outfile}" 2>/dev/null
+    dump2dcm "${dump}" "${outfile}"
 }
 
 echo "[generate-worklist] Generating worklist items in ${WL_DIR}"
