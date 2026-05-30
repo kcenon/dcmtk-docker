@@ -125,9 +125,11 @@ start_pacs_server() {
                 +cf "${cert_dir}/ca-cert.pem" \
                 -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"
         else
-            log_warn "TLS_ENABLED=true but this dcmqrscp build has no TLS support."
-            log_warn "Stock Debian apt dcmtk is not linked against OpenSSL; use a TLS-capable"
-            log_warn "(source-built / OpenSSL-linked) dcmtk image. Falling back to cleartext."
+            log_error "TLS_ENABLED=true but this dcmqrscp build has no TLS support (+tls)."
+            log_error "The stock Debian apt dcmtk is not linked against OpenSSL. Use a TLS-capable"
+            log_error "(source-built / OpenSSL-linked) dcmtk image, or unset TLS_ENABLED for cleartext."
+            log_error "Refusing to start: a PACS asked to serve TLS must not silently fall back to plaintext."
+            exit 1
         fi
     fi
 
