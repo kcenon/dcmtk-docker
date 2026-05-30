@@ -21,8 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # (11112) is >1024, so no privileged binding is required. Storage paths are
 # owned by this user so the entrypoint's runtime mkdir/touch and Docker
 # named-volume initialization (which inherits image ownership) work without root.
-RUN groupadd -r -g 10001 dcmtk \
-    && useradd -r -u 10001 -g dcmtk -d /dicom -s /usr/sbin/nologin dcmtk
+# NOTE: the Debian dcmtk package already creates a system "dcmtk" user/group,
+# so we use a distinct "pacs" account to avoid a groupadd/useradd collision.
+RUN groupadd -g 10001 pacs \
+    && useradd -u 10001 -g pacs -d /dicom -s /usr/sbin/nologin pacs
 
 # Create required directories
 RUN mkdir -p /dicom/db /dicom/testdata /dicom/received /etc/dcmtk
@@ -37,7 +39,7 @@ RUN chmod +x /usr/local/bin/*.sh
 # Hand ownership of writable paths to the non-root user. Bind-mounted host
 # paths (config:ro, tests:ro) are read-only; named volumes (pacs-data,
 # received-data) inherit this ownership on first mount.
-RUN chown -R dcmtk:dcmtk /dicom /etc/dcmtk
+RUN chown -R pacs:pacs /dicom /etc/dcmtk
 
 # Default DICOM port
 EXPOSE 11112
@@ -57,6 +59,6 @@ ENV ROLE=pacs-server \
     OID_ROOT=1.2.826.0.1.3680043.8.499
 
 # Drop to the non-root user for all roles
-USER dcmtk
+USER pacs
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
