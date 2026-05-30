@@ -64,7 +64,7 @@ print_header "C-FIND Query Tests"
 # ── Study-Level Queries ───────────────────────────────
 
 # Test 1: Wildcard patient query (should find >= 3 studies)
-run_find_test "wildcard patient query (STUDY level)" 3 \
+run_find_test "wildcard patient query (STUDY level)" "${MANIFEST_STUDY_COUNT}" \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=STUDY \
@@ -76,7 +76,7 @@ run_find_test "specific patient PAT001 (STUDY level)" 1 \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=STUDY \
-        -k PatientID="PAT001" \
+        -k PatientID="${MANIFEST_CT_PATIENT_ID}" \
         -k StudyInstanceUID || true
 
 # Test 3: Patient name with wildcard prefix
@@ -84,7 +84,7 @@ run_find_test "patient name DOE* (STUDY level)" 1 \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=STUDY \
-        -k PatientName="DOE*" \
+        -k PatientName="${MANIFEST_CT_PATIENT_NAME%%^*}*" \
         -k StudyInstanceUID || true
 
 # Test 4: Query by modality
@@ -92,7 +92,7 @@ run_find_test "modality filter CT (STUDY level)" 1 \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=STUDY \
-        -k ModalitiesInStudy="CT" \
+        -k ModalitiesInStudy="${MANIFEST_CT_MODALITY}" \
         -k PatientName \
         -k StudyInstanceUID || true
 
@@ -101,27 +101,27 @@ run_find_test "date filter 20240115 (STUDY level)" 1 \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=STUDY \
-        -k StudyDate="20240115" \
+        -k StudyDate="${MANIFEST_CT_STUDY_DATE}" \
         -k PatientName \
         -k StudyInstanceUID || true
 
 # Test 6: Query by date range
-run_find_test "date range 20240101-20240331 (STUDY level)" 3 \
+run_find_test "date range covering all studies (STUDY level)" "${MANIFEST_STUDY_COUNT}" \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=STUDY \
-        -k StudyDate="20240101-20240331" \
+        -k StudyDate="${MANIFEST_STUDY_DATE_RANGE}" \
         -k PatientName \
         -k StudyInstanceUID || true
 
 # ── Series-Level Queries ──────────────────────────────
 
 # Test 7: Series within MR study (PAT002 has 2 series: T1 + T2)
-run_find_test "series in MR study PAT002 (SERIES level)" 2 \
+run_find_test "series in MR study PAT002 (SERIES level)" "${MANIFEST_MR_SERIES_COUNT}" \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=SERIES \
-        -k StudyInstanceUID="${OID_ROOT}.2.1" \
+        -k StudyInstanceUID="${MANIFEST_MR_STUDY_UID}" \
         -k SeriesInstanceUID \
         -k Modality || true
 
@@ -130,7 +130,7 @@ run_find_test "series in CT study PAT001 (SERIES level)" 1 \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
         -k QueryRetrieveLevel=SERIES \
-        -k StudyInstanceUID="${OID_ROOT}.1.1" \
+        -k StudyInstanceUID="${MANIFEST_CT_STUDY_UID}" \
         -k SeriesInstanceUID \
         -k Modality || true
 
@@ -141,7 +141,7 @@ TEST_TOTAL=$((TEST_TOTAL + 1))
 NEG_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
     -S "${PACS_HOST}" "${PACS_PORT}" \
     -k QueryRetrieveLevel=STUDY \
-    -k PatientID="NONEXISTENT" \
+    -k PatientID="${MANIFEST_NONEXISTENT_PATIENT_ID}" \
     -k StudyInstanceUID 2>&1 | tr -d '\0' || true)
 NEG_COUNT=$(count_find_responses "${NEG_OUTPUT}" StudyInstanceUID)
 if [ "${NEG_COUNT}" -eq 0 ]; then

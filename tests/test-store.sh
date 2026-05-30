@@ -93,12 +93,12 @@ FIND_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
     -k StudyInstanceUID 2>&1 | tr -d '\0' || true)
 
 STUDY_COUNT=$(count_find_responses "${FIND_OUTPUT}" StudyInstanceUID)
-if [ "${STUDY_COUNT}" -ge 3 ]; then
-    print_pass "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= 3)"
-    print_verbose "Stored ${TOTAL_FILES} files across 3 patients"
+if [ "${STUDY_COUNT}" -ge "${MANIFEST_STUDY_COUNT}" ]; then
+    print_pass "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= ${MANIFEST_STUDY_COUNT})"
+    print_verbose "Stored ${TOTAL_FILES} files across ${MANIFEST_STUDY_COUNT} studies"
     TEST_PASSED=$((TEST_PASSED + 1))
 else
-    print_fail "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= 3)"
+    print_fail "C-STORE: verification via C-FIND (found ${STUDY_COUNT} studies, expected >= ${MANIFEST_STUDY_COUNT})"
     TEST_FAILED=$((TEST_FAILED + 1))
 fi
 

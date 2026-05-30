@@ -27,11 +27,22 @@ fi
 # Set by test-all.sh via environment; individual scripts default to off.
 VERBOSE="${VERBOSE:-false}"
 
-# ── Canonical OID root ────────────────────────────────
-# Single source of truth for the test-data OID root. Must match
-# scripts/generate-test-data.sh and env.default so standalone test
-# scripts query the same UIDs that the generator produces.
-DEFAULT_OID_ROOT="1.2.826.0.1.3680043.8.499"
+# ── Fixture manifest (single source of truth) ─────────
+# Source the shared fixture manifest so every test script inherits the same
+# OID root, UIDs, expected counts, and patient demographics that the data
+# generator (scripts/generate-test-data.sh) produces. Installed to
+# /usr/local/bin in the image; fall back to ../scripts for host-side runs.
+# This also defines DEFAULT_OID_ROOT for back-compat.
+if [ -f /usr/local/bin/fixture-manifest.sh ]; then
+    # shellcheck source=scripts/fixture-manifest.sh
+    source /usr/local/bin/fixture-manifest.sh
+else
+    _helpers_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "${_helpers_dir}/../scripts/fixture-manifest.sh" ]; then
+        # shellcheck source=scripts/fixture-manifest.sh
+        source "${_helpers_dir}/../scripts/fixture-manifest.sh"
+    fi
+fi
 
 # ── Counters ──────────────────────────────────────────
 TEST_PASSED=0
@@ -228,7 +239,7 @@ ensure_pacs_data() {
         | tr -d '\0' || true)
     existing=$(count_find_responses "${check_output}" StudyInstanceUID)
 
-    if [ "${existing}" -lt 3 ]; then
+    if [ "${existing}" -lt "${MANIFEST_STUDY_COUNT}" ]; then
         echo "Loading test data into PACS..."
         storescu -aet "${my_ae}" -aec "${pacs_ae}" \
             +sd +r "${pacs_host}" "${pacs_port}" "${data_dir}/" >/dev/null 2>&1 || true

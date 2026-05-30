@@ -8,10 +8,24 @@ set -e
 # Uses OID_ROOT env var for UID generation to avoid collision with clinical data.
 
 OUTPUT_DIR="${1:-${TEST_DATA_DIR:-/dicom/testdata}}"
-OID_ROOT="${OID_ROOT:-1.2.826.0.1.3680043.8.499}"
 GENERATE_PIXEL_DATA="${GENERATE_PIXEL_DATA:-false}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the fixture manifest (single source of truth for the OID root, UIDs,
+# instance counts, and patient demographics). Installed to /usr/local/bin in
+# the image; alongside in scripts/ for host runs. This also sets OID_ROOT.
+if [ -f "${SCRIPT_DIR}/fixture-manifest.sh" ]; then
+    # shellcheck source=scripts/fixture-manifest.sh
+    source "${SCRIPT_DIR}/fixture-manifest.sh"
+elif [ -f /usr/local/bin/fixture-manifest.sh ]; then
+    # shellcheck source=/usr/local/bin/fixture-manifest.sh
+    source /usr/local/bin/fixture-manifest.sh
+else
+    echo "[generate-test-data] ERROR: fixture-manifest.sh not found" >&2
+    exit 1
+fi
+
 if [ -f "${SCRIPT_DIR}/pixel-data-profile.sh" ]; then
     # shellcheck source=scripts/pixel-data-profile.sh
     source "${SCRIPT_DIR}/pixel-data-profile.sh"
@@ -356,108 +370,108 @@ PIXDUMP
     dump2dcm "${dump_file}" "${output_file}" 2>/dev/null
 }
 
-# ── Patient 1: DOE^JOHN - CT (5 slices) ─────────────
-echo "[generate-test-data] Creating Patient 1: DOE^JOHN (CT, 5 instances)"
+# ── Patient 1: CT ───────────────────────────────────
+echo "[generate-test-data] Creating Patient 1: ${MANIFEST_CT_PATIENT_NAME} (${MANIFEST_CT_MODALITY}, ${MANIFEST_CT_COUNT} instances)"
 
-STUDY_UID="${OID_ROOT}.1.1"
-SERIES_UID="${OID_ROOT}.1.1.1"
+STUDY_UID="${MANIFEST_CT_STUDY_UID}"
+SERIES_UID="${MANIFEST_CT_SERIES_UID}"
 
-for i in $(seq 1 5); do
-    SOP_UID="${OID_ROOT}.1.1.1.${i}"
+for i in $(seq 1 "${MANIFEST_CT_COUNT}"); do
+    SOP_UID="${SERIES_UID}.${i}"
     create_dicom \
         "${OUTPUT_DIR}/ct/ct_pat001_${i}.dcm" \
         "CTImageStorage" \
         "${SOP_UID}" \
-        "DOE^JOHN" \
-        "PAT001" \
-        "M" \
+        "${MANIFEST_CT_PATIENT_NAME}" \
+        "${MANIFEST_CT_PATIENT_ID}" \
+        "${MANIFEST_CT_PATIENT_SEX}" \
         "${STUDY_UID}" \
-        "20240115" \
-        "ACC001" \
-        "CT" \
-        "STUDY001" \
-        "CT Abdomen" \
+        "${MANIFEST_CT_STUDY_DATE}" \
+        "${MANIFEST_CT_ACCESSION}" \
+        "${MANIFEST_CT_MODALITY}" \
+        "${MANIFEST_CT_STUDY_ID}" \
+        "${MANIFEST_CT_STUDY_DESC}" \
         "${SERIES_UID}" \
         "1" \
-        "Axial 5mm" \
+        "${MANIFEST_CT_SERIES_DESC}" \
         "${i}"
 done
 
-# ── Patient 2: SMITH^JANE - MR (2 series x 3) ──────
-echo "[generate-test-data] Creating Patient 2: SMITH^JANE (MR, 6 instances)"
+# ── Patient 2: MR (T1 + T2 series) ──────────────────
+echo "[generate-test-data] Creating Patient 2: ${MANIFEST_MR_PATIENT_NAME} (${MANIFEST_MR_MODALITY}, ${MANIFEST_MR_COUNT} instances)"
 
-STUDY_UID="${OID_ROOT}.2.1"
+STUDY_UID="${MANIFEST_MR_STUDY_UID}"
 
 # Series 1: T1
-SERIES_UID="${OID_ROOT}.2.1.1"
-for i in $(seq 1 3); do
-    SOP_UID="${OID_ROOT}.2.1.1.${i}"
+SERIES_UID="${MANIFEST_MR_T1_SERIES_UID}"
+for i in $(seq 1 "${MANIFEST_MR_T1_COUNT}"); do
+    SOP_UID="${SERIES_UID}.${i}"
     create_dicom \
         "${OUTPUT_DIR}/mr/mr_pat002_s1_${i}.dcm" \
         "MRImageStorage" \
         "${SOP_UID}" \
-        "SMITH^JANE" \
-        "PAT002" \
-        "F" \
+        "${MANIFEST_MR_PATIENT_NAME}" \
+        "${MANIFEST_MR_PATIENT_ID}" \
+        "${MANIFEST_MR_PATIENT_SEX}" \
         "${STUDY_UID}" \
-        "20240220" \
-        "ACC002" \
-        "MR" \
-        "STUDY002" \
-        "MR Brain" \
+        "${MANIFEST_MR_STUDY_DATE}" \
+        "${MANIFEST_MR_ACCESSION}" \
+        "${MANIFEST_MR_MODALITY}" \
+        "${MANIFEST_MR_STUDY_ID}" \
+        "${MANIFEST_MR_STUDY_DESC}" \
         "${SERIES_UID}" \
         "1" \
-        "T1 Axial" \
+        "${MANIFEST_MR_T1_SERIES_DESC}" \
         "${i}"
 done
 
 # Series 2: T2
-SERIES_UID="${OID_ROOT}.2.1.2"
-for i in $(seq 1 3); do
-    SOP_UID="${OID_ROOT}.2.1.2.${i}"
+SERIES_UID="${MANIFEST_MR_T2_SERIES_UID}"
+for i in $(seq 1 "${MANIFEST_MR_T2_COUNT}"); do
+    SOP_UID="${SERIES_UID}.${i}"
     create_dicom \
         "${OUTPUT_DIR}/mr/mr_pat002_s2_${i}.dcm" \
         "MRImageStorage" \
         "${SOP_UID}" \
-        "SMITH^JANE" \
-        "PAT002" \
-        "F" \
+        "${MANIFEST_MR_PATIENT_NAME}" \
+        "${MANIFEST_MR_PATIENT_ID}" \
+        "${MANIFEST_MR_PATIENT_SEX}" \
         "${STUDY_UID}" \
-        "20240220" \
-        "ACC002" \
-        "MR" \
-        "STUDY002" \
-        "MR Brain" \
+        "${MANIFEST_MR_STUDY_DATE}" \
+        "${MANIFEST_MR_ACCESSION}" \
+        "${MANIFEST_MR_MODALITY}" \
+        "${MANIFEST_MR_STUDY_ID}" \
+        "${MANIFEST_MR_STUDY_DESC}" \
         "${SERIES_UID}" \
         "2" \
-        "T2 Axial" \
+        "${MANIFEST_MR_T2_SERIES_DESC}" \
         "${i}"
 done
 
-# ── Patient 3: WANG^LEI - CR (2 images) ─────────────
-echo "[generate-test-data] Creating Patient 3: WANG^LEI (CR, 2 instances)"
+# ── Patient 3: CR ───────────────────────────────────
+echo "[generate-test-data] Creating Patient 3: ${MANIFEST_CR_PATIENT_NAME} (${MANIFEST_CR_MODALITY}, ${MANIFEST_CR_COUNT} instances)"
 
-STUDY_UID="${OID_ROOT}.3.1"
-SERIES_UID="${OID_ROOT}.3.1.1"
+STUDY_UID="${MANIFEST_CR_STUDY_UID}"
+SERIES_UID="${MANIFEST_CR_SERIES_UID}"
 
-for i in $(seq 1 2); do
-    SOP_UID="${OID_ROOT}.3.1.1.${i}"
+for i in $(seq 1 "${MANIFEST_CR_COUNT}"); do
+    SOP_UID="${SERIES_UID}.${i}"
     create_dicom \
         "${OUTPUT_DIR}/cr/cr_pat003_${i}.dcm" \
         "ComputedRadiographyImageStorage" \
         "${SOP_UID}" \
-        "WANG^LEI" \
-        "PAT003" \
-        "M" \
+        "${MANIFEST_CR_PATIENT_NAME}" \
+        "${MANIFEST_CR_PATIENT_ID}" \
+        "${MANIFEST_CR_PATIENT_SEX}" \
         "${STUDY_UID}" \
-        "20240310" \
-        "ACC003" \
-        "CR" \
-        "STUDY003" \
-        "Chest PA" \
+        "${MANIFEST_CR_STUDY_DATE}" \
+        "${MANIFEST_CR_ACCESSION}" \
+        "${MANIFEST_CR_MODALITY}" \
+        "${MANIFEST_CR_STUDY_ID}" \
+        "${MANIFEST_CR_STUDY_DESC}" \
         "${SERIES_UID}" \
         "1" \
-        "Chest" \
+        "${MANIFEST_CR_SERIES_DESC}" \
         "${i}"
 done
 
