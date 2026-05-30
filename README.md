@@ -60,6 +60,33 @@ Host Machine
 All services use a single Docker image (`debian:bookworm-slim` + DCMTK 3.6.7).
 The `ROLE` environment variable selects which service to run.
 
+## Capabilities & Conformance
+
+This is a **classic-DIMSE test PACS** built on DCMTK `dcmqrscp`. It is purpose-built
+for deterministic, isolated testing of DICOM network (DIMSE) clients on uncompressed
+data — not a drop-in replacement for a full clinical archive.
+
+| Capability | Status | Notes |
+|------------|:------:|-------|
+| C-ECHO (Verification) | ✅ | Used as the DICOM-native healthcheck |
+| C-STORE (Storage) | ✅ | Indexed into a real queryable `index.dat` archive |
+| C-FIND (Query) | ✅ | Patient Root + Study Root; STUDY/SERIES levels tested |
+| C-MOVE (Retrieve) | ✅ | Cross-node; destination AE must be in the HostTable |
+| C-GET (Retrieve) | ✅ | Enabled by default |
+| Uncompressed transfer syntaxes | ✅ | Implicit VR LE, Explicit VR LE, Explicit VR BE |
+| AE-title access control | ✅ | Opt-in restricted (whitelist) profile |
+| Non-root container | ✅ | Network-facing PACS/receiver services run as the unprivileged `pacs` user (the test-client helper runs as root for host-mounted writes) |
+| Compressed transfer syntaxes (JPEG / JPEG-LS / JPEG2000 / RLE) | ❌ | Stock Debian `dcmtk` ships no codec libraries |
+| DICOMweb (WADO-RS / QIDO-RS / STOW-RS) | ❌ | Not a DCMTK feature |
+| Modality Worklist (MWL) | ❌ | Not served by `dcmqrscp` (planned) |
+| MPPS | ❌ | DCMTK ships no MPPS SCP |
+| Storage Commitment | ❌ | No N-ACTION / N-EVENT-REPORT SCP |
+| TLS / secure transport | ❌ | Running stack is cleartext only (planned) |
+
+For DICOMweb, worklist / MPPS / Storage-Commitment workflows, compressed pixel data,
+or TLS, reach for [Orthanc](https://www.orthanc-server.com/) or
+[dcm4chee-arc-light](https://github.com/dcm4che/dcm4chee-arc-light).
+
 ## CLI Wrapper (`pacs.sh`)
 
 A unified CLI script wraps all common operations:
@@ -69,13 +96,17 @@ A unified CLI script wraps all common operations:
 | `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`) |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
 | `./pacs.sh reset` | Wipe volumes and restart fresh |
 | `./pacs.sh clean` | Remove all containers, images, and volumes |
+| `./pacs.sh clean-data [--dry-run]` | Remove host-side generated DICOM data (preserves `data/dicom-templates` fixtures) |
 | `./pacs.sh echo [host] [port] [called-ae] [calling-ae]` | Quick C-ECHO connectivity check |
+| `./pacs.sh version` | Show the dcmtk-docker version |
 | `./pacs.sh help` | Show usage with examples |
+
+> The `restricted-mode` suite is run via a compose overlay, not `pacs.sh test`; see [Restricted AE whitelist profile](#restricted-ae-whitelist-profile-opt-in).
 
 All `docker compose` commands still work directly if you prefer.
 
@@ -552,19 +583,26 @@ restricted mode is purely an opt-in compose override (see
 ```
 dcmtk_docker/
 ├── pacs.sh                             # CLI wrapper (./pacs.sh help)
-├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK
+├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK (non-root)
 ├── docker-compose.yml                  # 4 services, 1 network, 3 volumes
+├── docker-compose.restricted.yml       # Overlay: AE-whitelist (restricted) mode
 ├── env.default                         # Default environment values (copy to .env)
+├── VERSION                             # Project version (single source of truth)
+├── CHANGELOG.md                        # Release history (Keep a Changelog)
+├── LICENSE                             # MIT license
 ├── .dockerignore                       # Build context exclusions
 ├── README.md                           # This file
 ├── config/
-│   ├── dcmqrscp-primary.cfg.template   # Primary PACS config template
-│   └── dcmqrscp-secondary.cfg.template # Secondary PACS config template
+│   ├── dcmqrscp-primary.cfg.template              # Primary PACS config template
+│   ├── dcmqrscp-secondary.cfg.template            # Secondary PACS config template
+│   ├── dcmqrscp-primary-restricted.cfg.template   # Primary, AE-whitelist variant
+│   ├── dcmqrscp-secondary-restricted.cfg.template # Secondary, AE-whitelist variant
+│   └── dcmqrscp-production.cfg.example            # Production-safe reference config
 ├── scripts/
 │   ├── entrypoint.sh                   # Role-based startup dispatcher
 │   ├── generate-test-data.sh           # Synthetic DICOM generation
 │   ├── pixel-data-profile.sh           # Shared PixelData profile defaults
-│   └── wait-for-pacs.sh               # Readiness polling
+│   └── wait-for-pacs.sh                # Readiness polling
 ├── data/
 │   └── dicom-templates/                # dump2dcm reference templates
 │       ├── ct-template.dump
@@ -576,6 +614,9 @@ dcmtk_docker/
 │   ├── test-find.sh                    # C-FIND tests
 │   ├── test-move.sh                    # C-MOVE tests
 │   ├── test-pixeldata.sh               # PixelData smoke tests
+│   ├── test-transfer-syntax.sh         # Transfer-syntax compatibility tests
+│   ├── test-load-smoke.sh              # Operational load smoke tests
+│   ├── test-restricted-mode.sh         # AE-whitelist rejection tests
 │   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
 └── docs/
@@ -709,4 +750,4 @@ docker compose exec test-client dcmdump +P PatientName +P StudyInstanceUID \
 
 ## License
 
-MIT
+Released under the MIT License. See [LICENSE](LICENSE) for the full text.

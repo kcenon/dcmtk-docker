@@ -7,6 +7,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
+# Project version - single source of truth is the VERSION file.
+if [ -f "${SCRIPT_DIR}/VERSION" ]; then
+    PACS_VERSION="$(cat "${SCRIPT_DIR}/VERSION")"
+else
+    PACS_VERSION="unknown"
+fi
+
 # ── Docker Compose detection ─────────────────────
 if docker compose version &>/dev/null; then
     DC="docker compose"
@@ -519,7 +526,7 @@ cmd_echo() {
 
 cmd_help() {
     cat <<EOF
-${C_BOLD}DCMTK Docker PACS - CLI Wrapper${C_RESET}
+${C_BOLD}DCMTK Docker PACS - CLI Wrapper${C_RESET} ${C_DIM}v${PACS_VERSION}${C_RESET}
 
 ${C_BOLD}Usage:${C_RESET}
   ./pacs.sh <command> [options]
@@ -539,6 +546,7 @@ ${C_BOLD}Commands:${C_RESET}
                     data/dicom-templates source fixtures
   ${C_GREEN}echo${C_RESET} [host] [port] [called-ae] [calling-ae]
                     Quick C-ECHO verification
+  ${C_GREEN}version${C_RESET}           Show the dcmtk-docker version
   ${C_GREEN}help${C_RESET}              Show this help message
 
 ${C_BOLD}Examples:${C_RESET}
@@ -573,6 +581,7 @@ case "${command}" in
     clean)   cmd_clean "$@" ;;
     clean-data) cmd_clean_data "$@" ;;
     echo)    cmd_echo "$@" ;;
+    version|--version|-v) echo "dcmtk-docker ${PACS_VERSION}" ;;
     help|-h|--help) cmd_help ;;
     *)
         err "Unknown command: ${command}"

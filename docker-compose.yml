@@ -3,6 +3,8 @@ services:
   # Full PACS with C-ECHO, C-STORE, C-FIND, C-MOVE via dcmqrscp
   pacs-server:
     build: .
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
@@ -48,6 +50,8 @@ services:
   # Second PACS instance for multi-PACS testing scenarios
   pacs-server-2:
     build: .
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
@@ -83,6 +87,8 @@ services:
   # Lightweight receiver for C-MOVE retrieval testing
   storescp-receiver:
     build: .
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
     environment:
       - ROLE=storescp
       - AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
@@ -107,6 +113,13 @@ services:
   # Interactive container with all DCMTK SCU tools
   test-client:
     build: .
+    # The test-client generates synthetic data into the host-bind-mounted ./data
+    # (owned by the host user), so it runs as root to keep that path writable.
+    # The network-facing PACS and receiver services run as the non-root 'pacs'
+    # user; this helper has no published ports and only runs SCU tools.
+    user: root
+    mem_limit: ${DICOM_MEM_LIMIT:-512m}
+    cpus: ${DICOM_CPUS:-1.0}
     environment:
       - ROLE=test-client
       - AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
