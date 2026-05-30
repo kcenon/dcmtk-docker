@@ -113,6 +113,11 @@ services:
   # Interactive container with all DCMTK SCU tools
   test-client:
     build: .
+    # The test-client generates synthetic data into the host-bind-mounted ./data
+    # (owned by the host user), so it runs as root to keep that path writable.
+    # The network-facing PACS and receiver services run as the non-root 'pacs'
+    # user; this helper has no published ports and only runs SCU tools.
+    user: root
     mem_limit: ${DICOM_MEM_LIMIT:-512m}
     cpus: ${DICOM_CPUS:-1.0}
     environment:

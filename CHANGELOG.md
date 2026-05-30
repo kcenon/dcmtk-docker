@@ -14,11 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-service memory and CPU limits in `docker-compose.yml`.
 
 ### Changed
-- Container now runs as a dedicated non-root user instead of `root`.
+- Network-facing PACS and receiver services now run as a dedicated non-root user (`pacs`, uid 10001) instead of `root`. The test-client helper (no published ports) stays root so it can write synthetic data into the host-bind-mounted `./data`.
 - Synced the README CLI command table and Project Structure tree with the actual `pacs.sh` subcommands and on-disk file layout.
 
 ### Security
-- Reduced container privilege (non-root) and bounded resource usage, lowering blast radius when the stack is wired into a downstream test loop.
+- Reduced privilege of the network-facing DICOM services (non-root) and bounded per-container resource usage, lowering blast radius when the stack is wired into a downstream test loop.
 
 ## [0.1.0] - 2026-05-30
 

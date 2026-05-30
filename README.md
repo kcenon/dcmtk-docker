@@ -75,7 +75,7 @@ data — not a drop-in replacement for a full clinical archive.
 | C-GET (Retrieve) | ✅ | Enabled by default |
 | Uncompressed transfer syntaxes | ✅ | Implicit VR LE, Explicit VR LE, Explicit VR BE |
 | AE-title access control | ✅ | Opt-in restricted (whitelist) profile |
-| Non-root container | ✅ | Services run as a dedicated unprivileged user |
+| Non-root container | ✅ | Network-facing PACS/receiver services run as the unprivileged `pacs` user (the test-client helper runs as root for host-mounted writes) |
 | Compressed transfer syntaxes (JPEG / JPEG-LS / JPEG2000 / RLE) | ❌ | Stock Debian `dcmtk` ships no codec libraries |
 | DICOMweb (WADO-RS / QIDO-RS / STOW-RS) | ❌ | Not a DCMTK feature |
 | Modality Worklist (MWL) | ❌ | Not served by `dcmqrscp` (planned) |
