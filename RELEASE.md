@@ -43,10 +43,15 @@ what the changelog describes.
 - Commit messages, issues, and PRs are in English (documents may be Korean); no
   AI attribution.
 
-> **Follow-up:** as of this writing `main` is **not yet protected**
-> (`gh api repos/kcenon/dcmtk-docker/branches/main/protection` returns 404).
-> Enable protection before relying on this process — at minimum require a pull
-> request and forbid force-pushes and branch deletion. This needs admin rights.
+> **Protection status:** `main` is protected (enabled 2026-05-31, issue #82).
+> A pull request is required before merging (0 required approvals, so a solo
+> maintainer is not locked out), force-pushes and branch deletion are forbidden,
+> and the full CI matrix is required and must be up to date before merge
+> (`strict`): the twelve isolation/aggregator/security checks that the
+> `develop`→`main` promotion runs (see #81). Protection is intentionally not
+> enforced against admins (`enforce_admins: false`, mirroring `develop`), so the
+> owner retains an emergency-merge path. Inspect the live rules with
+> `gh api repos/kcenon/dcmtk-docker/branches/main/protection`.
 
 ## Verifying after a release
 
