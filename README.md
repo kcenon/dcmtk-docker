@@ -82,7 +82,7 @@ data — not a drop-in replacement for a full clinical archive.
 | Modality Worklist (MWL) | ✅ | Served by `wlmscpfs` (`mwl-server`); query with `findscu -W` |
 | MPPS | ❌ | DCMTK ships no MPPS SCP — use Orthanc / dcm4chee |
 | Storage Commitment | ❌ | DCMTK ships no Storage-Commitment SCP — use dcm4chee |
-| TLS / secure transport | ✅ | Opt-in TLS profile (`docker-compose.tls.yml`); cleartext by default |
+| TLS / secure transport | ⚠️ | TLS profile (`docker-compose.tls.yml`) is ready, but stock Debian apt `dcmtk` is not OpenSSL-linked (`+tls` unsupported); needs a TLS-capable dcmtk image |
 
 For DICOMweb, MPPS / Storage-Commitment workflows, or compressed pixel data,
 reach for [Orthanc](https://www.orthanc-server.com/) or

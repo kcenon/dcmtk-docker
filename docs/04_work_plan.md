@@ -521,11 +521,15 @@ docker compose down -v
 | C-ECHO/STORE/FIND/MOVE | Yes | Yes |
 | dump2dcm | Yes | Yes |
 | img2dcm | Yes | Yes |
-| TLS support | Yes | Yes (improved) |
+| TLS support | **No** (not OpenSSL-linked) | Yes |
 | DICOMweb | No | No (not a DCMTK feature) |
 | JSON export | Limited | Improved |
 
-DCMTK 3.6.7 from Debian Bookworm is sufficient for all planned functionality.
+> Correction (verified in CI): the Debian Bookworm apt `dcmtk` package is **not**
+> linked against OpenSSL, so `dcmqrscp +tls` fails with "Unknown option +tls".
+> TLS therefore requires a TLS-capable (source-built / OpenSSL-linked) dcmtk
+> image; the shipped TLS profile detects this at runtime and falls back to
+> cleartext. All other planned functionality works on the apt build.
 
 ### Platform-Specific Concerns
 

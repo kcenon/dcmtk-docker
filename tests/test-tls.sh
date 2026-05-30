@@ -30,6 +30,15 @@ if [ "${TLS_ENABLED:-false}" != "true" ] || [ ! -f "${CERT_DIR}/client-cert.pem"
     exit 0
 fi
 
+# Skip when this dcmtk build has no TLS support. The stock Debian apt dcmtk is
+# not linked against OpenSSL, so +tls is unavailable; the TLS profile needs a
+# TLS-capable (source-built / OpenSSL-linked) dcmtk image.
+if ! echoscu --help 2>&1 | grep -q -- '--enable-tls'; then
+    print_skip "this dcmtk build has no TLS support (stock Debian apt dcmtk is not OpenSSL-linked)"
+    print_summary "TLS"
+    exit 0
+fi
+
 # Test 1: a +tls C-ECHO with the client certificate succeeds.
 TEST_TOTAL=$((TEST_TOTAL + 1))
 if echoscu +tls "${CERT_DIR}/client-key.pem" "${CERT_DIR}/client-cert.pem" \
