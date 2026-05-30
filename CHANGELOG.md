@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TLS overlay no longer deadlocks the stack on a non-TLS-capable image. When `TLS_ENABLED=true` but the `dcmqrscp` build lacks `+tls`, the entrypoint now fails fast (`exit 1`) with an explicit error instead of falling through to cleartext while the overlay healthcheck hung on `echoscu +tls` — which previously left `pacs-server` permanently unhealthy and blocked `test-client` from starting (#59).
 
 ### Security
+- Added `cap_drop: [ALL]` and `security_opt: [no-new-privileges:true]` to the four network-facing services (`pacs-server`, `pacs-server-2`, `storescp-receiver`, `mwl-server`) as defence-in-depth atop the non-root user; the high-port DICOM listeners need no Linux capabilities. A read-only root filesystem is deferred (documented in `docker-compose.yml`) because the entrypoint renders config to `/tmp` and DCMTK tools use temp files. (#64)
 - Reduced privilege of the network-facing DICOM services (non-root) and bounded per-container resource usage, lowering blast radius when the stack is wired into a downstream test loop.
 
 ## [0.1.0] - 2026-05-30

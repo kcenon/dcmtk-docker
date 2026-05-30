@@ -5,6 +5,15 @@ services:
     build: .
     mem_limit: ${DICOM_MEM_LIMIT:-512m}
     cpus: ${DICOM_CPUS:-1.0}
+    # Defence-in-depth on top of the non-root 'pacs' user: drop all Linux
+    # capabilities (the DICOM listener binds a high port, so none are needed)
+    # and forbid privilege escalation. A read_only root filesystem is deferred:
+    # the entrypoint renders the config to /tmp and several DCMTK tools use
+    # temp files, so it would need tmpfs mounts to be added safely.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
@@ -54,6 +63,10 @@ services:
     build: .
     mem_limit: ${DICOM_MEM_LIMIT:-512m}
     cpus: ${DICOM_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - ROLE=pacs-server
       - AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
@@ -93,6 +106,10 @@ services:
     build: .
     mem_limit: ${DICOM_MEM_LIMIT:-512m}
     cpus: ${DICOM_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - ROLE=storescp
       - AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
@@ -120,6 +137,10 @@ services:
     build: .
     mem_limit: ${DICOM_MEM_LIMIT:-512m}
     cpus: ${DICOM_CPUS:-1.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - ROLE=worklist
       - AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
