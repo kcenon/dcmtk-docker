@@ -1,0 +1,42 @@
+# TLS overlay - serve the primary PACS over authenticated secure DICOM.
+#
+# IMPORTANT: the stock Debian apt dcmtk package is NOT linked against OpenSSL, so
+# dcmqrscp rejects +tls ("Unknown option +tls"). On the default image the
+# entrypoint detects this and falls back to cleartext with a warning. Use a
+# TLS-capable (source-built / OpenSSL-linked) dcmtk image for this overlay to
+# actually serve TLS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml \
+#       exec test-client /tests/test-tls.sh
+#
+# The pacs-server entrypoint generates a self-signed CA + server + client cert
+# into the shared tls-certs volume (scripts/gen-certs.sh) and launches dcmqrscp
+# with +tls. The test-client mounts the same volume read-only and uses the
+# client cert to connect with `echoscu +tls`. Only the primary PACS is switched
+# to TLS; the other services stay cleartext.
+
+services:
+  pacs-server:
+    environment:
+      - TLS_ENABLED=true
+      - TLS_CERT_DIR=/dicom/certs
+    volumes:
+      - tls-certs:/dicom/certs
+    # Health is now proven over TLS using the generated client certificate.
+    healthcheck:
+      test: ["CMD-SHELL", "echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem +cf /dicom/certs/ca-cert.pem -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  test-client:
+    environment:
+      - TLS_ENABLED=true
+      - TLS_CERT_DIR=/dicom/certs
+    volumes:
+      - tls-certs:/dicom/certs:ro
+
+volumes:
+  tls-certs:

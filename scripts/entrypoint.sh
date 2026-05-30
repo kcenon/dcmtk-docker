@@ -108,6 +108,29 @@ start_pacs_server() {
         fi
     fi
 
+    # TLS profile: serve over an authenticated secure connection. This requires a
+    # dcmqrscp built with OpenSSL (+tls). The stock Debian apt dcmtk package is
+    # NOT linked against OpenSSL, so we detect support at runtime and fall back to
+    # cleartext (with a clear warning) rather than crash-looping. Use a TLS-capable
+    # (source-built / OpenSSL-linked) dcmtk image to actually serve TLS.
+    if [ "${TLS_ENABLED:-false}" = "true" ]; then
+        if dcmqrscp --help 2>&1 | grep -q -- '--enable-tls'; then
+            local cert_dir="${TLS_CERT_DIR:-/dicom/certs}"
+            if [ -x /usr/local/bin/gen-certs.sh ]; then
+                /usr/local/bin/gen-certs.sh "${cert_dir}"
+            fi
+            log_info "Starting dcmqrscp with TLS on port ${DICOM_PORT}..."
+            exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" \
+                +tls "${cert_dir}/server-key.pem" "${cert_dir}/server-cert.pem" \
+                +cf "${cert_dir}/ca-cert.pem" \
+                -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"
+        else
+            log_warn "TLS_ENABLED=true but this dcmqrscp build has no TLS support."
+            log_warn "Stock Debian apt dcmtk is not linked against OpenSSL; use a TLS-capable"
+            log_warn "(source-built / OpenSSL-linked) dcmtk image. Falling back to cleartext."
+        fi
+    fi
+
     log_info "Starting dcmqrscp on port ${DICOM_PORT}..."
     exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" \
         -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"

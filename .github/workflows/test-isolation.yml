@@ -332,3 +332,9 @@ jobs:
       - name: Tear down stack
         if: always()
         run: docker compose down -v
+
+  # NOTE: there is intentionally no TLS CI job. The stock Debian apt dcmtk
+  # package is not linked against OpenSSL, so dcmqrscp rejects +tls
+  # ("Unknown option +tls"). The TLS profile (docker-compose.tls.yml) and
+  # tests/test-tls.sh are ready for a TLS-capable (OpenSSL-linked) dcmtk image
+  # but cannot be exercised on this base image; test-tls.sh skips accordingly.

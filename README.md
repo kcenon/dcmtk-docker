@@ -82,9 +82,9 @@ data — not a drop-in replacement for a full clinical archive.
 | Modality Worklist (MWL) | ✅ | Served by `wlmscpfs` (`mwl-server`); query with `findscu -W` |
 | MPPS | ❌ | DCMTK ships no MPPS SCP — use Orthanc / dcm4chee |
 | Storage Commitment | ❌ | DCMTK ships no Storage-Commitment SCP — use dcm4chee |
-| TLS / secure transport | ❌ | Running stack is cleartext only (planned) |
+| TLS / secure transport | ⚠️ | TLS profile (`docker-compose.tls.yml`) is ready, but stock Debian apt `dcmtk` is not OpenSSL-linked (`+tls` unsupported); needs a TLS-capable dcmtk image |
 
-For DICOMweb, MPPS / Storage-Commitment workflows, compressed pixel data, or TLS,
+For DICOMweb, MPPS / Storage-Commitment workflows, or compressed pixel data,
 reach for [Orthanc](https://www.orthanc-server.com/) or
 [dcm4chee-arc-light](https://github.com/dcm4che/dcm4chee-arc-light).
 
@@ -608,6 +608,7 @@ dcmtk_docker/
 ├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK (non-root)
 ├── docker-compose.yml                  # 4 services, 1 network, 3 volumes
 ├── docker-compose.restricted.yml       # Overlay: AE-whitelist (restricted) mode
+├── docker-compose.tls.yml              # Overlay: secure DICOM (TLS) mode
 ├── env.default                         # Default environment values (copy to .env)
 ├── VERSION                             # Project version (single source of truth)
 ├── CHANGELOG.md                        # Release history (Keep a Changelog)
@@ -623,6 +624,7 @@ dcmtk_docker/
 ├── scripts/
 │   ├── entrypoint.sh                   # Role-based startup dispatcher
 │   ├── fixture-manifest.sh             # Shared fixture identity (SSOT)
+│   ├── gen-certs.sh                    # Self-signed TLS test certificates
 │   ├── generate-test-data.sh           # Synthetic DICOM generation
 │   ├── generate-worklist.sh            # Modality Worklist (.wl) generation
 │   ├── inject-extra-peers.sh           # Ad-hoc C-MOVE HostTable injection
@@ -644,6 +646,7 @@ dcmtk_docker/
 │   ├── test-restricted-mode.sh         # AE-whitelist rejection tests
 │   ├── test-worklist.sh                # Modality Worklist (findscu -W) tests
 │   ├── test-adhoc-peers.sh             # Ad-hoc C-MOVE peer injection tests
+│   ├── test-tls.sh                     # TLS secure-transport tests
 │   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
 └── docs/
