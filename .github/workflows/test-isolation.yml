@@ -426,6 +426,79 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  test-adhoc-cmove:
+    name: ad-hoc C-MOVE delivery (EXTRA_PEERS e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env with an EXTRA_PEERS-only destination
+        run: |
+          cp env.default .env
+          # Register storescp-receiver under a NEW AE (ADHOC_SCP) that is NOT in
+          # the static HostTable, so a successful C-MOVE delivery proves the
+          # EXTRA_PEERS injection path works end-to-end (not the static peer).
+          sed -i 's/^EXTRA_PEERS=.*/EXTRA_PEERS=adhoc=ADHOC_SCP:storescp-receiver:11112/' .env
+          grep '^EXTRA_PEERS=adhoc=ADHOC_SCP:storescp-receiver:11112' .env
+
+      - name: Build and start stack
+        run: |
+          docker compose up -d --build
+          sleep 5
+
+      - name: Wait for all SCP services to be healthy
+        run: |
+          services="pacs-server pacs-server-2 storescp-receiver mwl-server"
+          for i in $(seq 1 60); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
+              if [ "$status" != "healthy" ]; then
+                pending="$pending $svc=$status"
+              fi
+            done
+            if [ -z "$pending" ]; then
+              echo "All SCP services are healthy"
+              exit 0
+            fi
+            echo "waiting for SCP services (attempt $i/60, pending:$pending)"
+            sleep 2
+          done
+          echo "ERROR: not all SCP services became healthy in time"
+          for svc in $services; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
+            if [ "$status" != "healthy" ]; then
+              echo "=== $svc not healthy (status: $status); logs ==="
+              docker compose logs --tail=100 "$svc" || true
+            fi
+          done
+          exit 1
+
+      - name: C-MOVE to the EXTRA_PEERS-only destination and verify arrival
+        run: docker compose exec -T -e ADHOC_DEST_AE=ADHOC_SCP test-client /tests/test-adhoc-cmove.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose logs pacs-server || true
+          docker compose logs storescp-receiver || true
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
   # NOTE: there is intentionally no TLS CI job. The stock Debian apt dcmtk
   # package is not linked against OpenSSL, so dcmqrscp rejects +tls
   # ("Unknown option +tls"). The TLS profile (docker-compose.tls.yml) and
