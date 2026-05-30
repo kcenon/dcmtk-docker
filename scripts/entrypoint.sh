@@ -108,6 +108,20 @@ start_pacs_server() {
         fi
     fi
 
+    # TLS profile: serve over an authenticated secure connection. Certificates
+    # are generated on demand into the (shared) cert directory.
+    if [ "${TLS_ENABLED:-false}" = "true" ]; then
+        local cert_dir="${TLS_CERT_DIR:-/dicom/certs}"
+        if [ -x /usr/local/bin/gen-certs.sh ]; then
+            /usr/local/bin/gen-certs.sh "${cert_dir}"
+        fi
+        log_info "Starting dcmqrscp with TLS on port ${DICOM_PORT}..."
+        exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" \
+            +tls "${cert_dir}/server-key.pem" "${cert_dir}/server-cert.pem" \
+            +cf "${cert_dir}/ca-cert.pem" \
+            -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"
+    fi
+
     log_info "Starting dcmqrscp on port ${DICOM_PORT}..."
     exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" \
         -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"

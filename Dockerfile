@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dcmtk \
     gettext-base \
     netcat-openbsd \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a dedicated non-root user to run the DICOM services. The DICOM port
@@ -27,7 +28,7 @@ RUN groupadd -g 10001 pacs \
     && useradd -u 10001 -g pacs -d /dicom -s /usr/sbin/nologin pacs
 
 # Create required directories
-RUN mkdir -p /dicom/db /dicom/testdata /dicom/received /dicom/worklist /etc/dcmtk
+RUN mkdir -p /dicom/db /dicom/testdata /dicom/received /dicom/worklist /dicom/certs /etc/dcmtk
 
 # Copy configuration templates
 COPY config/ /etc/dcmtk/
