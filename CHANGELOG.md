@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-31
+
 ### Added
 - `LICENSE` file (MIT) matching the README license claim.
 - `VERSION` stamp and this `CHANGELOG.md` so downstream consumers can pin a known release.
@@ -41,3 +43,6 @@ Initial baseline: DCMTK `dcmqrscp` test PACS exposing C-ECHO / C-STORE / C-FIND 
 a two-PACS topology plus a `storescp` C-MOVE receiver and a test-client SCU container,
 deterministic synthetic CT/MR/CR data, an opt-in AE-whitelist restricted profile, and a
 scripted DIMSE test suite with receiver-side C-MOVE verification.
+
+[Unreleased]: https://github.com/kcenon/dcmtk-docker/compare/v0.2.0...develop
+[0.2.0]: https://github.com/kcenon/dcmtk-docker/releases/tag/v0.2.0
