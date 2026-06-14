@@ -43,7 +43,7 @@ services:
       # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
       - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
-      - "${PACS1_HOST_PORT:-11112}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS1_HOST_PORT:-11112}:11112"
     volumes:
       - pacs-data:/dicom/db
       - ./config:/etc/dcmtk:ro
@@ -86,7 +86,7 @@ services:
       # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
       - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
-      - "${PACS2_HOST_PORT:-11113}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS2_HOST_PORT:-11113}:11112"
     volumes:
       - pacs2-data:/dicom/db
       - ./config:/etc/dcmtk:ro
@@ -117,7 +117,7 @@ services:
       - STORAGE_DIR=/dicom/received
       - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
-      - "${STORESCP_HOST_PORT:-11114}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${STORESCP_HOST_PORT:-11114}:11112"
     volumes:
       - received-data:/dicom/received
     networks:
@@ -151,7 +151,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
     ports:
-      - "${WLM_HOST_PORT:-11115}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${WLM_HOST_PORT:-11115}:11112"
     volumes:
       - worklist-data:/dicom/worklist
     networks:

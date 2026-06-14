@@ -481,6 +481,7 @@ cp env.default .env
 | `STORESCP_AE_TITLE` | `STORE_SCP` | Store SCP receiver AE Title |
 | `STORESCP_HOST_PORT` | `11114` | Store SCP receiver host port |
 | `TEST_SCU_AE_TITLE` | `TEST_SCU` | Test client AE Title |
+| `PACS_BIND_ADDR` | `0.0.0.0` | Host interface the published ports bind to. Set to e.g. `127.0.0.1` to expose ports only to the local host (see Security Notes) |
 | `DICOM_PORT` | `11112` | Internal container DICOM port |
 | `MAX_PDU_SIZE` | `16384` | Maximum PDU size (bytes) |
 | `MAX_ASSOCIATIONS` | `16` | Maximum concurrent associations |
@@ -568,6 +569,48 @@ Even with a peer whitelist, a production deployment should add:
 - **Access reviews**: Periodically audit the HostTable; remove
   decommissioned peers and rotate AE Titles when needed.
 
+### Restricting the published bind address
+
+By default every published DICOM port binds to all host interfaces
+(`0.0.0.0`). Docker programs its own iptables rules for published ports,
+which **bypass host-level firewalls such as `ufw`**, so a port published
+on `0.0.0.0` is reachable from any network the host can see.
+
+The `PACS_BIND_ADDR` environment variable controls the host interface
+the four published ports bind to:
+
+```
+ports:
+  - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS1_HOST_PORT:-11112}:11112"
+```
+
+The default `0.0.0.0` preserves the original behavior (CI and the test
+suite reach the services over the Docker network, not host ports, so the
+default keeps them green). For any deployment that touches a non-isolated
+network, set `PACS_BIND_ADDR` in your `.env` to a single trusted
+interface — typically loopback — and reach the stack through a reverse
+proxy or SSH tunnel:
+
+```bash
+# .env: only expose the published ports to the local host
+PACS_BIND_ADDR=127.0.0.1
+```
+
+Combine this with a firewall and/or a TLS-terminating reverse proxy that
+enforces peer identity. Note: a secure-by-default `127.0.0.1` bind is a
+behavior change and is intentionally **not** the shipped default; it is
+tracked separately.
+
+#### Concurrency is bounded at the network boundary, not per-service
+
+`storescp` (`storescp-receiver`) and `wlmscpfs` (`mwl-server`) are
+single-process sequential receivers, and DCMTK provides no
+concurrent-association cap flag for them — there is no per-service knob
+to invent here. Bound their exposure with the network boundary above
+(firewall / reverse proxy / restricted `PACS_BIND_ADDR`) rather than a
+DCMTK option. `dcmqrscp` does cap concurrency via its existing
+`MaxAssociations` setting (`MAX_ASSOCIATIONS`, default 16).
+
 ### Restricted AE whitelist profile (opt-in)
 
 For test runs that need to exercise production-like access control
@@ -583,6 +626,27 @@ The `restricted` profile keeps the same HostTable entries used by the
 test suite (`test_client`, `store_scp`, sibling PACS), so the default
 test data path still works. Any Calling AE Title outside that list is
 rejected at association setup.
+
+#### What restricted mode does NOT cover
+
+Restricted mode is **not** a stack-wide authentication switch. It swaps
+only the two `dcmqrscp` config templates, so it protects **only the
+dcmqrscp query/retrieve entry** (the primary and secondary PACS
+servers). The other DICOM-facing services remain unauthenticated in
+**every** mode, including restricted:
+
+- **`storescp-receiver`** accepts unauthenticated C-STORE from any peer.
+  Its `--aetitle` flag sets the receiver's own Called AE Title; it is
+  **not** a Calling-AE whitelist and does not restrict who may connect.
+- **`mwl-server`** (`wlmscpfs`) accepts unauthenticated C-FIND from any
+  peer and has no Calling-AE access control. A Modality Worklist query
+  returns scheduled-procedure and patient demographic data (PHI), so any
+  unauthenticated C-FIND can read the worklist.
+
+If you need to restrict these services, place a network boundary in
+front of them (firewall, private VLAN, or a TLS-terminating reverse
+proxy that enforces peer identity). DCMTK's `storescp` and `wlmscpfs`
+do not provide a built-in Calling-AE whitelist.
 
 ```bash
 # Start the stack in restricted (whitelist) mode

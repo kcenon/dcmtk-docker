@@ -40,13 +40,25 @@ MaxAssociations = 16
 # Replace each entry below with a real modality / viewer / archive.
 # The "all_peers" line aggregates them into a single whitelist that the
 # AETable references by name.
+#
+# IMPORTANT - self and sibling PACS for C-MOVE:
+#   C-MOVE requires the move *destination* AE to resolve through the same
+#   HostTable / peer group. If you operate more than one PACS node, or expect
+#   a node to C-MOVE to itself, you MUST register the self AE (the AETable
+#   entry below, here PROD_PACS) and every sibling PACS in the HostTable and
+#   include them in "all_peers". Omitting them yields "no matching
+#   destination" / unknown move destination errors at C-MOVE time. The
+#   self_pacs / sibling_pacs rows below are examples; replace the AE Titles,
+#   hostnames, and ports with your real nodes.
 HostTable BEGIN
   modality_ct1   = (CT_SCANNER_01,  ct1.hospital.example,         11112)
   modality_mr1   = (MR_SCANNER_01,  mr1.hospital.example,         11112)
   viewer_main    = (PACS_VIEWER,    viewer.hospital.example,      11112)
   archive_dr     = (DR_ARCHIVE,     archive.dr.hospital.example,  11112)
+  self_pacs      = (PROD_PACS,      pacs1.hospital.example,       11112)
+  sibling_pacs   = (PROD_PACS_2,    pacs2.hospital.example,       11112)
 
-  all_peers      = modality_ct1, modality_mr1, viewer_main, archive_dr
+  all_peers      = modality_ct1, modality_mr1, viewer_main, archive_dr, self_pacs, sibling_pacs
 HostTable END
 
 # VendorTable: optional grouping by vendor or department.
