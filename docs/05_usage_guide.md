@@ -97,15 +97,18 @@ The `pacs.sh` script wraps all common operations into short subcommands:
 
 | Command | Action |
 |---------|--------|
-| `./pacs.sh up` | Auto-setup `.env`, build & start, wait for health |
+| `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`, `adhoc-peers`) |
+| `./pacs.sh add-peer <name> <ae> <host> <port>` | Register an ad-hoc C-MOVE destination and restart the PACS |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
 | `./pacs.sh reset` | Wipe volumes and restart fresh |
 | `./pacs.sh clean` | Remove all containers, images, and volumes |
-| `./pacs.sh echo [host] [port]` | Quick C-ECHO connectivity check |
+| `./pacs.sh clean-data [--dry-run]` | Remove host-side generated DICOM data (preserves `data/dicom-templates` fixtures) |
+| `./pacs.sh echo [host] [port] [called-ae] [calling-ae]` | Quick C-ECHO connectivity check |
+| `./pacs.sh version` | Show the dcmtk-docker version |
 | `./pacs.sh help` | Show usage with examples |
 
 All `docker compose` commands still work directly if preferred.
