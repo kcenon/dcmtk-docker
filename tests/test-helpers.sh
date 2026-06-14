@@ -131,10 +131,11 @@ run_test_expect_fail() {
     shift 2
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
-    local output=""
-    output=$("$@" 2>&1) || true
+    local rc=0
+    local output
+    output=$("$@" 2>&1) || rc=$?
 
-    if ! "$@" >/dev/null 2>&1; then
+    if [ "$rc" -ne 0 ]; then
         print_pass "${prefix}: ${description}"
         TEST_PASSED=$((TEST_PASSED + 1))
         return 0
