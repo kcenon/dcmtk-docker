@@ -170,7 +170,7 @@ print_status_table() {
     printf "%-20s %-12s %-14s %-10s\n" "────────────────────" "────────────" "──────────────" "──────────"
 
     for svc in "${ALL_SERVICES[@]}"; do
-        local status ae_title port cid
+        local status_label status_color ae_title port cid
 
         cid=$(service_container_id "${svc}")
 
@@ -184,14 +184,18 @@ print_status_table() {
             health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' "${cid}" 2>/dev/null || echo "-")
         fi
 
+        # Keep the color separate from the label so the ANSI escape bytes do not
+        # count toward the printf field width; otherwise %-Nb on a colored
+        # string misaligns the STATUS column in a TTY. C_* are empty in non-TTY
+        # mode, so the uncolored output is unchanged.
         if [ "${state}" = "running" ] && [ "${health}" = "healthy" ]; then
-            status="${C_GREEN}healthy${C_RESET}"
+            status_label="healthy"; status_color="${C_GREEN}"
         elif [ "${state}" = "running" ] && [ "${health}" = "-" ]; then
-            status="${C_YELLOW}running${C_RESET}"
+            status_label="running"; status_color="${C_YELLOW}"
         elif [ "${state}" = "running" ]; then
-            status="${C_YELLOW}${health}${C_RESET}"
+            status_label="${health}"; status_color="${C_YELLOW}"
         else
-            status="${C_RED}${state}${C_RESET}"
+            status_label="${state}"; status_color="${C_RED}"
         fi
 
         # AE Title from container env
@@ -211,7 +215,12 @@ print_status_table() {
         fi
         [ -z "${port}" ] && port="-"
 
-        printf "%-20s %-22b %-14s %-10s\n" "${svc}" "${status}" "${ae_title}" "${port}"
+        # Pad the uncolored label to the column width first, then wrap the
+        # padded field in color via %b so the escape codes sit outside the
+        # measured width and the STATUS column aligns with its header.
+        local status_field
+        printf -v status_field "%-12s" "${status_label}"
+        printf "%-20s %b %-14s %-10s\n" "${svc}" "${status_color}${status_field}${C_RESET}" "${ae_title}" "${port}"
     done
     printf "\n"
 }
