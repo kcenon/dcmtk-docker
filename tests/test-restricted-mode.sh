@@ -43,7 +43,7 @@ print_header "Restricted Mode Negative Tests"
 
 if ! ensure_scp_reachable "Primary PACS" "${PACS_HOST}" "${PACS_PORT}" \
         "${PACS_AE}" "${KNOWN_AE}"; then
-    err "Primary PACS not reachable; cannot run restricted-mode tests."
+    print_fail "Primary PACS not reachable; cannot run restricted-mode tests." >&2
     exit 1
 fi
 

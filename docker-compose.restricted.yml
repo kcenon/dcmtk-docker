@@ -14,19 +14,75 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d
 #
-# This file deliberately overrides ONLY the CONFIG_TEMPLATE env var. All
-# other service settings (ports, volumes, healthcheck, depends_on) are
-# inherited from docker-compose.yml, so the restricted profile remains a
-# pure opt-in swap with no other behavioral drift.
+# This file overrides three settings under the restricted profile:
+#
+#   1. CONFIG_TEMPLATE: re-points each PACS at the *-restricted.cfg.template
+#      variants, where the AETable Peers field is the HostTable "all_peers"
+#      whitelist instead of the wildcard "ANY".
+#
+#   2. healthcheck (both PACS): the base healthcheck is a C-ECHO
+#      (echoscu -aec $AE_TITLE localhost 11112). With no -aet, the Calling AE
+#      defaults to "ECHOSCU", and the caller resolves as "localhost". Under
+#      the restricted profile, dcmqrscp's "all_peers" whitelist enumerates
+#      (test_client, store_scp, pacs2) and access control matches BOTH the
+#      Calling AE Title AND the caller hostname (dcmqrcnf.cc peerInAETitle).
+#      "ECHOSCU"@localhost is not in the whitelist, so the C-ECHO is rejected,
+#      the PACS never reports "healthy", and test-client's
+#      depends_on: service_healthy hangs forever.
+#
+#      To decouple readiness from AE access control, each PACS healthcheck is
+#      overridden here to a TCP liveness probe (nc -z localhost 11112;
+#      netcat-openbsd is installed in the image). AE-whitelist behavior is
+#      verified separately by tests/test-restricted-mode.sh, which is the
+#      proper place for that assertion.
+#
+#   3. container_name (the four whitelisted services): dcmqrscp matches a
+#      peer by reverse-resolving the source IP to a hostname and comparing
+#      that string to the HostTable entry. Docker's embedded DNS returns the
+#      *container name* for a reverse (PTR) lookup -- by default
+#      "<project>-<service>-N", which never equals the bare service name the
+#      HostTable expects (test-client, storescp-receiver, pacs-server,
+#      pacs-server-2). Without a fixed container name, even the whitelisted
+#      callers are rejected (BadAEService), so the positive assertions in
+#      test-restricted-mode.sh fail. Pinning container_name to the exact
+#      HostTable hostname makes the PTR record match, so known callers are
+#      accepted and unknown Calling AE Titles are still rejected. Note:
+#      container_name forbids running more than one copy of this overlay on a
+#      host concurrently -- acceptable for the opt-in restricted profile.
+#
+# Because the healthcheck command and container names differ from the default
+# profile, this overlay is NOT a pure CONFIG_TEMPLATE-only swap. All other
+# settings (ports, volumes, depends_on) are inherited from docker-compose.yml
+# unchanged.
 #
 # See README "Restricted AE whitelist profile" and config/
 # dcmqrscp-{primary,secondary}-restricted.cfg.template for details.
 
 services:
   pacs-server:
+    container_name: pacs-server
     environment:
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary-restricted.cfg.template
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   pacs-server-2:
+    container_name: pacs-server-2
     environment:
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-secondary-restricted.cfg.template
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 11112"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  storescp-receiver:
+    container_name: storescp-receiver
+
+  test-client:
+    container_name: test-client

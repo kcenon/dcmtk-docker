@@ -139,16 +139,18 @@ convert_transfer_syntax() {
 }
 
 # ── Helper: storescu acceptance against primary PACS ──
-# Sends a single instance with `+xs` (propose presentation context with the
-# file's own transfer syntax) so the SCP must negotiate the exact syntax we
-# care about, rather than silently re-encoding.
+# Sends a single instance proposing exactly the transfer syntax under test via
+# the matching storescu --propose-* option, so the SCP must negotiate that
+# syntax rather than fall back to a default encoding. The propose flag is
+# passed in by the caller (one of -xe / -xi / -xb).
 assert_storescu_accepts() {
     local label="$1"
     local file="$2"
+    local propose_flag="$3"
 
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
-    if storescu -aet "${MY_AE}" -aec "${PACS_AE}" +xs \
+    if storescu -aet "${MY_AE}" -aec "${PACS_AE}" "${propose_flag}" \
             "${PACS_HOST}" "${PACS_PORT}" "${file}" >/dev/null 2>&1; then
         print_pass "Transfer Syntax: ${label} storescu C-STORE accepted by ${PACS_AE}"
         TEST_PASSED=$((TEST_PASSED + 1))
@@ -161,22 +163,23 @@ assert_storescu_accepts() {
 }
 
 # ── Conversion + acceptance matrix ───────────────────
-# (label, dcmconv flag, expected transfer syntax UID)
+# (label, dcmconv flag, expected transfer syntax UID, storescu propose flag)
 run_case() {
     local label="$1"
     local flag="$2"
     local expected_uid="$3"
+    local propose_flag="$4"
 
     local out_file="${WORKDIR}/${label}.dcm"
 
     convert_transfer_syntax        "${label}" "${flag}" "${SOURCE_FILE}" "${out_file}" || return
     assert_transfer_syntax_uid     "${label}" "${out_file}" "${expected_uid}" || true
-    assert_storescu_accepts        "${label}" "${out_file}" || true
+    assert_storescu_accepts        "${label}" "${out_file}" "${propose_flag}" || true
 }
 
-run_case "explicit-vr-le" "+te" "${TS_UID_EXPLICIT_LE}"
-run_case "implicit-vr-le" "+ti" "${TS_UID_IMPLICIT_LE}"
-run_case "explicit-vr-be" "+tb" "${TS_UID_EXPLICIT_BE}"
+run_case "explicit-vr-le" "+te" "${TS_UID_EXPLICIT_LE}" "-xe"
+run_case "implicit-vr-le" "+ti" "${TS_UID_IMPLICIT_LE}" "-xi"
+run_case "explicit-vr-be" "+tb" "${TS_UID_EXPLICIT_BE}" "-xb"
 
 # ── Summary ──────────────────────────────────────────
 print_summary "Transfer Syntax"

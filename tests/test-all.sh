@@ -132,6 +132,8 @@ run_suite "PixelData" "${SCRIPT_DIR}/test-pixeldata.sh"
 run_suite "MWL"       "${SCRIPT_DIR}/test-worklist.sh"
 run_suite "Ad-hocPeers" "${SCRIPT_DIR}/test-adhoc-peers.sh"
 run_suite "Ad-hocCMoveE2E" "${SCRIPT_DIR}/test-adhoc-cmove.sh"
+run_suite "TransferSyntax" "${SCRIPT_DIR}/test-transfer-syntax.sh"
+run_suite "LoadSmoke"    "${SCRIPT_DIR}/test-load-smoke.sh"
 run_suite "TLS"          "${SCRIPT_DIR}/test-tls.sh"
 
 # ── Final Summary ─────────────────────────────────────
