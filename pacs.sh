@@ -544,7 +544,10 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_GREEN}up${C_RESET}                Build and start all services
   ${C_GREEN}down${C_RESET}              Stop all services
   ${C_GREEN}status${C_RESET}            Show service health, ports, and AE titles
-  ${C_GREEN}test${C_RESET} [suite]      Run tests (all, echo, store, find, move, pixeldata, transfer-syntax, load-smoke)
+  ${C_GREEN}test${C_RESET} [suite]      Run tests (all, echo, store, find, move, pixeldata,
+                    transfer-syntax, load-smoke, worklist, adhoc-peers)
+                    Note: the restricted-mode suite is CI-only (compose overlay),
+                    not a './pacs.sh test' target
   ${C_GREEN}logs${C_RESET} [service]    Tail logs (all or specific service)
   ${C_GREEN}shell${C_RESET}             Open bash in the test-client container
   ${C_GREEN}reset${C_RESET}             Stop, wipe volumes, and restart fresh

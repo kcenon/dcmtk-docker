@@ -45,7 +45,7 @@ Host Machine
 │  │ AE:TEST_SCU  │                                        │
 │  └──────────────┘                                        │
 └──────────────────────────────────────────────────────────┘
-  Host ports:  :11112  :11113  :11114
+  Host ports:  :11112  :11113  :11114  :11115
 ```
 
 ## Services
@@ -348,6 +348,7 @@ wiped safely.
 |------|------|---------|-------|
 | `data/dicom-templates/` | Source fixture | Yes | `*.dump` templates consumed by the generator; never delete |
 | `data/ct/`, `data/mr/`, `data/cr/` | Generated | No | Synthetic DICOM written on first `./pacs.sh up` |
+| `data/dicom-output/`, `data/received/` | Generated | No | Test runtime artifacts |
 
 #### Test-data manifest (single source of truth)
 
@@ -368,7 +369,6 @@ without editing a test:
 3. Point the test scripts at the target via the `PACS_HOST` / `PACS_PORT` /
    `PACS_AE_TITLE` environment variables and run them — the assertions follow
    `OID_ROOT` automatically.
-| `data/dicom-output/`, `data/received/` | Generated | No | Test runtime artifacts |
 
 To regenerate test data, remove the generated directories and restart:
 
@@ -480,6 +480,7 @@ cp env.default .env
 | `PACS2_HOST_PORT` | `11113` | Secondary PACS host port |
 | `STORESCP_AE_TITLE` | `STORE_SCP` | Store SCP receiver AE Title |
 | `STORESCP_HOST_PORT` | `11114` | Store SCP receiver host port |
+| `WLM_HOST_PORT` | `11115` | Modality Worklist SCP host port |
 | `TEST_SCU_AE_TITLE` | `TEST_SCU` | Test client AE Title |
 | `PACS_BIND_ADDR` | `0.0.0.0` | Host interface the published ports bind to. Set to e.g. `127.0.0.1` to expose ports only to the local host (see Security Notes) |
 | `DICOM_PORT` | `11112` | Internal container DICOM port |
@@ -730,7 +731,7 @@ dcmtk_docker/
 2. **Check the AE Title**: DICOM AE Titles are case-sensitive. Use exactly `DCMTK_PACS`, not `dcmtk_pacs`.
    The PACS healthcheck issues `echoscu -aec ${AE_TITLE}` against itself, so a container will be marked
    `unhealthy` if the configured `AE_TITLE` does not match what `dcmqrscp` actually loaded.
-3. **Check the port**: All containers listen on internal port `11112`. Host ports differ (11112, 11113, 11114)
+3. **Check the port**: All containers listen on internal port `11112`. Host ports differ (11112, 11113, 11114, 11115)
 4. **Check the network**: Services must be on the same Docker network (`dicom-net`)
 
 ```bash
@@ -840,7 +841,7 @@ docker compose exec test-client dcmdump +P PatientName +P StudyInstanceUID \
 
 - Docker Engine 20.10+ with Docker Compose V2
 - ~200 MB disk space for the image
-- Ports 11112-11114 available on the host (configurable via `.env`)
+- Ports 11112-11115 available on the host (configurable via `.env`)
 
 ## License
 

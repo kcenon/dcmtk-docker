@@ -3,6 +3,8 @@
 > Step-by-step implementation plan for the Docker-based DCMTK PACS test environment.
 > References `03_architecture_design.md` for all architectural decisions.
 
+> **Baseline note:** This document is primarily the 0.1.0 design baseline; some 0.2.0 content is included. README/CHANGELOG are authoritative.
+
 ---
 
 ## Table of Contents
