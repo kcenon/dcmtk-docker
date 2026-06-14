@@ -12,6 +12,8 @@ on:
     paths:
       - 'tests/**'
       - 'docker-compose.yml'
+      - 'docker-compose.restricted.yml'
+      - 'docker-compose.tls.yml'
       - 'Dockerfile'
       - 'scripts/**'
       - 'config/**'
@@ -21,6 +23,8 @@ on:
     paths:
       - 'tests/**'
       - 'docker-compose.yml'
+      - 'docker-compose.restricted.yml'
+      - 'docker-compose.tls.yml'
       - 'Dockerfile'
       - 'scripts/**'
       - 'config/**'
@@ -40,6 +44,8 @@ jobs:
           - test-move.sh
           - test-worklist.sh
           - test-adhoc-peers.sh
+          - test-transfer-syntax.sh
+          - test-load-smoke.sh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -533,6 +539,79 @@ jobs:
       - name: Tear down stack
         if: always()
         run: docker compose down -v
+
+  test-restricted-mode:
+    name: restricted-mode AE whitelist (negative tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage .env from defaults
+        run: cp env.default .env
+
+      - name: Build and start the restricted overlay
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d --build
+          # Give services a moment to settle past their start_period
+          sleep 5
+
+      - name: Wait for all SCP services to be healthy
+        run: |
+          services="pacs-server pacs-server-2 storescp-receiver mwl-server"
+          for i in $(seq 1 60); do
+            pending=""
+            for svc in $services; do
+              cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+              if [ -n "$cid" ]; then
+                status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "starting")
+              else
+                status="starting"
+              fi
+              if [ "$status" != "healthy" ]; then
+                pending="$pending $svc=$status"
+              fi
+            done
+            if [ -z "$pending" ]; then
+              echo "All SCP services are healthy"
+              exit 0
+            fi
+            echo "waiting for SCP services (attempt $i/60, pending:$pending)"
+            sleep 2
+          done
+          echo "ERROR: not all SCP services became healthy in time"
+          for svc in $services; do
+            cid=$(docker compose ps -q "$svc" 2>/dev/null | head -n1)
+            if [ -n "$cid" ]; then
+              status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo "missing")
+            else
+              status="missing"
+            fi
+            if [ "$status" != "healthy" ]; then
+              echo "=== $svc not healthy (status: $status); logs ==="
+              docker compose logs --tail=100 "$svc" || true
+            fi
+          done
+          exit 1
+
+      - name: Run test-restricted-mode.sh against the restricted overlay
+        run: docker compose exec -T test-client /tests/test-restricted-mode.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "=== pacs-server logs ==="
+          docker compose logs pacs-server || true
+          echo "=== pacs-server-2 logs ==="
+          docker compose logs pacs-server-2 || true
+          echo "=== storescp-receiver logs ==="
+          docker compose logs storescp-receiver || true
+          echo "=== test-client logs ==="
+          docker compose logs test-client || true
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.restricted.yml down -v
 
   # NOTE: the test-tls-skip job above exercises tests/test-tls.sh's skip path on
   # the base image. There is intentionally no TLS-SERVING job: the stock Debian
