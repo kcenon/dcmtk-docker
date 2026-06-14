@@ -1,8 +1,14 @@
 # DCMTK PACS Test Environment
 # Single image, multiple roles via ROLE environment variable
 # Based on debian:bookworm-slim with DCMTK 3.6.7 (apt)
+#
+# Base image and dcmtk apt version are pinned for reproducible, deterministic
+# builds (SBOM / CVE tracking). To refresh: pull debian:bookworm-slim, read
+# its RepoDigest and the dcmtk apt candidate (apt-cache policy dcmtk), then
+# update the digest below and the dcmtk= pin in the apt-get install step.
 
-FROM debian:bookworm-slim
+# debian:bookworm-slim pinned by digest (multi-arch manifest list).
+FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716
 
 LABEL maintainer="dcmtk-pacs-docker"
 LABEL description="DCMTK-based PACS test environment with all DICOM tools"
@@ -12,7 +18,7 @@ LABEL description="DCMTK-based PACS test environment with all DICOM tools"
 # - gettext-base: provides envsubst for config template processing
 # - netcat-openbsd: for TCP health checks (nc)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    dcmtk \
+    dcmtk=3.6.7-9~deb12u3 \
     gettext-base \
     netcat-openbsd \
     openssl \
