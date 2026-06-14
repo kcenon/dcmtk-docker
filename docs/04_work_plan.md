@@ -525,11 +525,12 @@ docker compose down -v
 | DICOMweb | No | No (not a DCMTK feature) |
 | JSON export | Limited | Improved |
 
-> Correction (verified in CI): the Debian Bookworm apt `dcmtk` package is **not**
-> linked against OpenSSL, so `dcmqrscp +tls` fails with "Unknown option +tls".
-> TLS therefore requires a TLS-capable (source-built / OpenSSL-linked) dcmtk
-> image; the shipped TLS profile detects this at runtime and falls back to
-> cleartext. All other planned functionality works on the apt build.
+> Correction (TLS skip path verified in CI): the Debian Bookworm apt `dcmtk`
+> package is **not** linked against OpenSSL, so `dcmqrscp +tls` fails with
+> "Unknown option +tls". TLS therefore requires a TLS-capable (source-built /
+> OpenSSL-linked) dcmtk image; the shipped TLS profile refuses to start (exit 1)
+> rather than silently downgrading to cleartext. All other planned functionality
+> works on the apt build.
 
 ### Platform-Specific Concerns
 

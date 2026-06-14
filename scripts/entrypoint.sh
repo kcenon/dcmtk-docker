@@ -110,8 +110,8 @@ start_pacs_server() {
 
     # TLS profile: serve over an authenticated secure connection. This requires a
     # dcmqrscp built with OpenSSL (+tls). The stock Debian apt dcmtk package is
-    # NOT linked against OpenSSL, so we detect support at runtime and fall back to
-    # cleartext (with a clear warning) rather than crash-looping. Use a TLS-capable
+    # NOT linked against OpenSSL, so we detect support at runtime and refuse to
+    # start (exit 1) rather than silently downgrading to cleartext. Use a TLS-capable
     # (source-built / OpenSSL-linked) dcmtk image to actually serve TLS.
     if [ "${TLS_ENABLED:-false}" = "true" ]; then
         if dcmqrscp --help 2>&1 | grep -q -- '--enable-tls'; then
