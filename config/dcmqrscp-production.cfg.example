@@ -23,7 +23,8 @@
 #
 # Security checklist before going live:
 #   - Run dcmqrscp behind a network boundary (firewall / private VLAN).
-#   - Use TLS (dcmqrscp --enable-tls ...) where supported.
+#   - Use TLS: dcmqrscp accepts --enable-tls from DCMTK 3.6.9 (this image
+#     has 3.6.7); otherwise put a TLS-terminating proxy in front of it.
 #   - Audit the HostTable so only known modalities are listed.
 #   - Rotate AE Titles if a peer is decommissioned.
 #   - Monitor dcmqrscp logs for rejected associations and alert on spikes.

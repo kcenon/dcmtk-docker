@@ -30,11 +30,12 @@ if [ "${TLS_ENABLED:-false}" != "true" ] || [ ! -f "${CERT_DIR}/client-cert.pem"
     exit 0
 fi
 
-# Skip when this dcmtk build has no TLS support. The stock Debian apt dcmtk is
-# not linked against OpenSSL, so +tls is unavailable; the TLS profile needs a
-# TLS-capable (source-built / OpenSSL-linked) dcmtk image.
+# Skip when this echoscu has no TLS options, i.e. DCMTK was built without
+# OpenSSL. Debian's dcmtk is built with OpenSSL, so its echoscu passes this
+# check; the server side needs a dcmqrscp with TLS options (DCMTK 3.6.9 or
+# later), which the pacs-server entrypoint checks before it starts.
 if ! echoscu --help 2>&1 | grep -q -- '--enable-tls'; then
-    print_skip "this dcmtk build has no TLS support (stock Debian apt dcmtk is not OpenSSL-linked)"
+    print_skip "this echoscu has no TLS options (DCMTK built without OpenSSL)"
     print_summary "TLS"
     exit 0
 fi

@@ -5,10 +5,10 @@ set -uo pipefail
 #
 # The synthetic data generator (scripts/generate-test-data.sh) emits every
 # instance as Explicit VR Little Endian (UID 1.2.840.10008.1.2.1) only. This
-# script exercises the *other* uncompressed transfer syntaxes that DCMTK's
-# default storescp/dcmqrscp build accepts, so we have an automated signal
+# script exercises the *other* uncompressed transfer syntaxes that dcmqrscp
+# accepts with its default options, so we have an automated signal
 # when:
-#   - `dcmconv` cannot perform the requested conversion (codec missing),
+#   - `dcmconv` cannot perform the requested conversion,
 #   - the output file's (0002,0010) TransferSyntaxUID does not match the
 #     requested target,
 #   - `storescu` (the SCU) cannot negotiate the resulting transfer syntax
@@ -24,10 +24,13 @@ set -uo pipefail
 #                                                              registry.
 #
 # No compressed transfer syntaxes (JPEG / JPEG-LS / RLE / JPEG2000) are
-# exercised here: those require codec libraries (libjpeg, libcharls, ...)
-# that are not part of the Debian `dcmtk` package this image installs.
-# When/if a codec image variant is published, add the matching `dcmconv`
-# flags (`+ej`, `+ee`, `+er`, ...) below.
+# exercised here, because the PACS accepts none: the entrypoint starts
+# dcmqrscp with its default preference (+x=), which offers only uncompressed
+# syntaxes. The image does have DCMTK's JPEG, JPEG-LS, and RLE codec tools
+# (dcmcjpeg, dcmcjpls, dcmcrle); it has no JPEG 2000 codec. dcmconv writes
+# only uncompressed and deflated syntaxes, so a compressed case needs one of
+# those tools plus a matching dcmqrscp preference option (for example +xs);
+# docs/08_test_suite.md lists the steps.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/test-helpers.sh"
@@ -39,9 +42,9 @@ PACS_AE="${PACS_AE_TITLE:-DCMTK_PACS}"
 MY_AE="${AE_TITLE:-TEST_SCU}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
 
-# Uncompressed transfer syntaxes always available with the DCMTK Debian
-# package. Keep this list narrow on purpose; docs/08_test_suite.md documents how to
-# extend it once codec-enabled images ship.
+# Uncompressed transfer syntaxes that dcmqrscp accepts with its default
+# options. Keep this list narrow on purpose; docs/08_test_suite.md documents
+# how to extend it to compressed syntaxes.
 TS_UID_IMPLICIT_LE="1.2.840.10008.1.2"
 TS_UID_EXPLICIT_LE="1.2.840.10008.1.2.1"
 TS_UID_EXPLICIT_BE="1.2.840.10008.1.2.2"

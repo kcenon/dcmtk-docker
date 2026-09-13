@@ -25,7 +25,7 @@ Part of the dcmtk-docker documentation; start from the [README](../README.md).
 The synthetic data generator emits every instance as Explicit VR Little
 Endian. The `transfer-syntax` suite (`tests/test-transfer-syntax.sh`) takes
 that source instance and uses `dcmconv` to convert it to the three
-uncompressed syntaxes that DCMTK's default Debian package always accepts,
+uncompressed syntaxes that `dcmqrscp` accepts with its default options,
 then verifies `storescu` can negotiate each one against the primary PACS:
 
 | Label            | Transfer Syntax UID    | `dcmconv` flag |
@@ -34,11 +34,23 @@ then verifies `storescu` can negotiate each one against the primary PACS:
 | implicit-vr-le   | 1.2.840.10008.1.2      | `+ti`          |
 | explicit-vr-be   | 1.2.840.10008.1.2.2    | `+tb`          |
 
-Compressed syntaxes (JPEG / JPEG-LS / RLE / JPEG2000) require codec
-libraries that are not part of the upstream Debian `dcmtk` package; the
-suite intentionally skips them. To extend coverage once a codec-enabled
-image variant ships, add the matching `dcmconv` flag (`+ej`, `+er`, ...)
-and target UID to the matrix in `tests/test-transfer-syntax.sh`.
+The suite covers no compressed syntax (JPEG / JPEG-LS / RLE / JPEG2000),
+because the primary PACS accepts none: the entrypoint starts `dcmqrscp`
+with its default preference (`+x=`), which offers only the three syntaxes
+above. The image already has DCMTK's JPEG, JPEG-LS, and RLE codec tools
+(`dcmcjpeg`, `dcmcjpls`, `dcmcrle`, and the matching `dcmdjpeg`,
+`dcmdjpls`, and `dcmdrle` decoders); it has no JPEG 2000 codec. To extend
+coverage:
+
+1. Pass `dcmqrscp` a preference option for the target syntax (the
+   entrypoint passes none today), such as `+xs` (JPEG Lossless), `+xt`
+   (JPEG-LS Lossless), or `+xr` (RLE Lossless). Each option adds one
+   compressed syntax to the three above; an association negotiation
+   profile (`-xf`) can list several.
+2. Create the test object with `dcmcjpeg`, `dcmcjpls`, or `dcmcrle`.
+   `dcmconv` writes only uncompressed and deflated syntaxes.
+3. Add the target UID and the matching `storescu` proposal option (`-xs`,
+   `-xt`, or `-xr`) to the matrix in `tests/test-transfer-syntax.sh`.
 
 ## Load Smoke Testing
 

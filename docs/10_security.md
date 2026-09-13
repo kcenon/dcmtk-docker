@@ -49,8 +49,11 @@ Even with a peer whitelist, a production deployment should add:
 
 - **Network isolation**: Run `dcmqrscp` behind a firewall or on a private
   VLAN. DICOM is not encrypted by default.
-- **TLS**: Use `dcmqrscp --enable-tls` (or a TLS-terminating proxy) to
-  protect data in transit.
+- **TLS**: `dcmqrscp` has TLS options (`--enable-tls`) only from DCMTK
+  3.6.9, and this image has DCMTK 3.6.7. Protect data in transit with a
+  TLS-terminating proxy in front of it, or run DCMTK 3.6.9 or later. In
+  3.6.9, TLS covers incoming associations (storage, query, and C-GET) but
+  not the outgoing C-MOVE sub-associations; DCMTK 3.7.0 adds those.
 - **Audit logging**: Set `LOG_LEVEL=info` (or `debug` during incident
   triage) and forward `dcmqrscp` logs to a central log store. Alert on
   rejected associations.
