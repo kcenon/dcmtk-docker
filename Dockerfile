@@ -18,7 +18,7 @@ LABEL description="DCMTK-based PACS test environment with all DICOM tools"
 # - gettext-base: provides envsubst for config template processing
 # - netcat-openbsd: for TCP health checks (nc)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    dcmtk=3.6.7-9~deb12u3 \
+    dcmtk=3.6.7-9~deb12u4 \
     gettext-base \
     netcat-openbsd \
     openssl \
