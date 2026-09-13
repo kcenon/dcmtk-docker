@@ -11,7 +11,7 @@
 # listed in the HostTable below. Use this profile to exercise production-
 # like access control inside the test environment.
 #
-# How to activate (opt-in, see README "Restricted AE whitelist profile"):
+# How to activate (opt-in, see docs/10_security.md "Restricted AE whitelist profile"):
 #   docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d
 #
 # For a production-grade example (real hostnames, TLS pointers, hardening
