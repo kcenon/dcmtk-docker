@@ -13,3 +13,7 @@ docs/
 # Test data and scripts (bind-mounted at runtime, not baked into image)
 data/
 tests/
+
+# README lint and its tests (CI only; COPY scripts/ would otherwise put them in the image)
+scripts/readme_lint.py
+scripts/tests/

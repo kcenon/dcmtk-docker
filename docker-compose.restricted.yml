@@ -55,7 +55,7 @@
 # settings (ports, volumes, depends_on) are inherited from docker-compose.yml
 # unchanged.
 #
-# See README "Restricted AE whitelist profile" and config/
+# See docs/10_security.md "Restricted AE whitelist profile" and config/
 # dcmqrscp-{primary,secondary}-restricted.cfg.template for details.
 
 services:

@@ -90,5 +90,5 @@ conservative marker-file guard at `${STORAGE_DIR}/${AE_TITLE}/.indexed`:
 
 The trade-off is that newly added test DICOM files are not picked up
 automatically across restarts; the user must either delete the marker file
-or wipe the storage volume. This is documented in `README.md` and in the
+or wipe the storage volume. This is documented in `docs/08_test_suite.md` and in the
 inline comment block in `scripts/entrypoint.sh`.

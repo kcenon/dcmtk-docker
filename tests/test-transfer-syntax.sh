@@ -40,7 +40,7 @@ MY_AE="${AE_TITLE:-TEST_SCU}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
 
 # Uncompressed transfer syntaxes always available with the DCMTK Debian
-# package. Keep this list narrow on purpose; the README documents how to
+# package. Keep this list narrow on purpose; docs/08_test_suite.md documents how to
 # extend it once codec-enabled images ship.
 TS_UID_IMPLICIT_LE="1.2.840.10008.1.2"
 TS_UID_EXPLICIT_LE="1.2.840.10008.1.2.1"

@@ -18,7 +18,8 @@ what the changelog describes.
 
 1. Ensure `develop` is green and the issues for the release milestone are closed.
 2. **Bump the version**: set `VERSION` to the new `X.Y.Z` (SemVer — MINOR for
-   new features, PATCH for fixes).
+   new features, PATCH for fixes), and point the README status line's release
+   link at `vX.Y.Z` (`scripts/readme_lint.py` fails while they differ).
 3. **Roll the changelog**: in `CHANGELOG.md`, rename `## [Unreleased]` to
    `## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it, and
    refresh the compare links at the bottom of the file.
