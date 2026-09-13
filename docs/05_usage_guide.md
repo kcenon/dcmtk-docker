@@ -538,24 +538,29 @@ docker compose run --rm -e ROLE=custom test-client \
 
 ### TLS-Secured DICOM (DICOM TLS)
 
-**Important:** the stock Debian apt `dcmtk` package this image is built on is
-**not** linked against OpenSSL, so its tools reject `+tls` ("Unknown option
-+tls"). TLS therefore cannot be served on the default image. The repository
-ships the complete wiring so a TLS-capable (source-built / OpenSSL-linked) dcmtk
-image can serve TLS without further changes:
+**Important:** the primary PACS cannot serve TLS on this image. The Debian
+bookworm `dcmtk` package in this image (DCMTK 3.6.7) is built with OpenSSL,
+and its `storescp`, `storescu`, `echoscu`, and `findscu` accept `+tls`. Its
+`dcmqrscp`, however, has no TLS options and rejects `+tls`: DCMTK added TLS
+to `dcmqrscp` in 3.6.9, which Debian 13 (trixie) ships. `movescu`, `getscu`,
+and `wlmscpfs` have no TLS options in 3.6.7 either. Rebuilding DCMTK 3.6.7
+with OpenSSL would not change any of this. The repository ships the wiring
+for a `dcmqrscp` that has TLS options:
 
 - `docker-compose.tls.yml` — an overlay that switches the primary PACS to
   authenticated `dcmqrscp +tls`.
 - `scripts/gen-certs.sh` — generates a self-signed CA + server + client
   certificates into the shared `tls-certs` volume at container start.
 - `tests/test-tls.sh` — asserts a `+tls` C-ECHO succeeds while a plaintext
-  association is refused; it skips cleanly when TLS is unavailable.
+  association is refused; it skips cleanly when TLS is not enabled or
+  `echoscu` has no TLS options.
 
-On the default (non-OpenSSL) image the entrypoint detects the missing `+tls`
-support and, when `TLS_ENABLED=true`, **refuses to start (exit 1)** with a clear
-error rather than silently downgrading to cleartext.
+When `TLS_ENABLED=true`, the entrypoint checks whether `dcmqrscp --help` lists
+`--enable-tls`. On this image it does not, so the entrypoint **refuses to start
+(exit 1)** with a clear error rather than silently downgrading to cleartext.
 
-**Running the overlay** (meaningful only on a TLS-capable image):
+**Running the overlay** (it needs a `dcmqrscp` with TLS options, that is,
+DCMTK 3.6.9 or later):
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
@@ -564,8 +569,9 @@ docker compose -f docker-compose.yml -f docker-compose.tls.yml \
 ```
 
 `gen-certs.sh` produces the certificates automatically; the DCMTK TLS tool
-invocations then look like the following (these succeed only against a
-TLS-capable build — on the stock image they fail with "Unknown option +tls"):
+invocations then look like the following (`echoscu` on this image accepts
+these options, but the primary PACS answers over TLS only when the overlay
+runs on DCMTK 3.6.9 or later):
 
 ```bash
 # TLS-enabled C-ECHO with the generated client certificate
@@ -574,8 +580,10 @@ echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem \
     -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112
 ```
 
-To actually serve TLS, build the image from an OpenSSL-linked dcmtk (a source
-build) in place of the stock apt package.
+To serve TLS from the primary PACS, build the image with DCMTK 3.6.9 or
+later (for example Debian trixie's `dcmtk` package, or a source build with
+OpenSSL), or put a TLS-terminating proxy in front of `dcmqrscp`. With DCMTK
+3.6.9, C-MOVE sub-associations stay cleartext; DCMTK 3.7.0 adds TLS for them.
 
 ### Adding Additional PACS Nodes
 

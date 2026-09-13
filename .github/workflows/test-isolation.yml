@@ -524,13 +524,60 @@ jobs:
         # test-tls.sh checks TLS_ENABLED before touching any SCP, so the default
         # (cleartext) stack must make it skip with exit 0. Proving the skip path
         # still works guards against a silent regression in its guards. There is
-        # intentionally no TLS-serving job: the stock apt dcmtk is not
-        # OpenSSL-linked, so +tls cannot run on this base image.
+        # intentionally no TLS-serving job: DCMTK 3.6.7's dcmqrscp has no TLS
+        # options (DCMTK added them in 3.6.9), so the PACS cannot serve TLS on
+        # this base image.
         run: |
           out=$(docker compose exec -T test-client /tests/test-tls.sh)
           echo "$out"
           echo "$out" | grep -q "SKIP" || { echo "ERROR: expected test-tls.sh to SKIP on the cleartext stack"; exit 1; }
           echo "OK: test-tls.sh skipped cleanly"
+
+      - name: Confirm the DCMTK facts behind the TLS and codec docs
+        # README.md, docs/05, docs/08, docs/10, and docker-compose.tls.yml say
+        # that this image's dcmqrscp has no TLS options while storescp and
+        # echoscu have them, and that the dcmtk package ships the JPEG,
+        # JPEG-LS, and RLE codec tools (#104). Fail when a base-image or dcmtk
+        # pin change makes one of these statements false.
+        run: |
+          probe() { docker compose exec -T test-client sh -c "$1"; }
+          probe 'storescp --version'
+          qr=$(probe 'dcmqrscp --help 2>&1 | grep -c -- --enable-tls || true')
+          st=$(probe 'storescp --help 2>&1 | grep -c -- --enable-tls || true')
+          ec=$(probe 'echoscu --help 2>&1 | grep -c -- --enable-tls || true')
+          codecs=$(probe 'dpkg -L dcmtk | grep -cE "/usr/bin/dcm[cd](jpeg|jpls|rle)$" || true')
+          echo "dcmqrscp --enable-tls lines: $qr (expected 0)"
+          echo "storescp --enable-tls lines: $st (expected 1 or more)"
+          echo "echoscu --enable-tls lines: $ec (expected 1 or more)"
+          echo "dcmtk codec tools: $codecs (expected 6)"
+          if [ "$qr" -eq 0 ] && [ "$st" -ge 1 ] && [ "$ec" -ge 1 ] && [ "$codecs" -eq 6 ]; then
+            echo "OK: the documented DCMTK facts hold"
+          else
+            echo "ERROR: a documented DCMTK fact changed; update the TLS and codec statements (#104)"
+            exit 1
+          fi
+
+      - name: Assert the TLS overlay refuses to start on this image
+        # With TLS_ENABLED=true the entrypoint must exit 1 with its explicit
+        # error instead of serving cleartext, because this image's dcmqrscp
+        # has no TLS options (#59, #104). GENERATE_TEST_DATA=false skips the
+        # data generation and indexing that run before the TLS check.
+        run: |
+          set +e
+          out=$(docker compose -f docker-compose.yml -f docker-compose.tls.yml \
+            run --rm --no-deps -T -e GENERATE_TEST_DATA=false pacs-server 2>&1)
+          rc=$?
+          set -e
+          echo "$out"
+          if [ "$rc" -ne 1 ]; then
+            echo "ERROR: expected exit 1 from the TLS overlay, got $rc"
+            exit 1
+          fi
+          if ! grep -q "has no TLS options" <<<"$out"; then
+            echo "ERROR: expected the entrypoint's TLS error message"
+            exit 1
+          fi
+          echo "OK: the TLS overlay refuses to start on this image"
 
       - name: Dump logs on failure
         if: failure()
@@ -538,7 +585,7 @@ jobs:
 
       - name: Tear down stack
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.yml -f docker-compose.tls.yml down -v
 
   test-restricted-mode:
     name: restricted-mode AE whitelist (negative tests)
@@ -614,7 +661,9 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.restricted.yml down -v
 
   # NOTE: the test-tls-skip job above exercises tests/test-tls.sh's skip path on
-  # the base image. There is intentionally no TLS-SERVING job: the stock Debian
-  # apt dcmtk package is not linked against OpenSSL, so dcmqrscp rejects +tls
-  # ("Unknown option +tls"). The TLS profile (docker-compose.tls.yml) and
-  # tests/test-tls.sh are ready for a TLS-capable (OpenSSL-linked) dcmtk image.
+  # the base image, confirms the DCMTK facts that the TLS and codec docs state,
+  # and checks that the TLS overlay refuses to start. There is intentionally no
+  # TLS-SERVING job: Debian bookworm's dcmtk 3.6.7 is built with OpenSSL, but
+  # its dcmqrscp has no TLS options (DCMTK added them in 3.6.9), so dcmqrscp
+  # rejects +tls. The TLS profile (docker-compose.tls.yml) and tests/test-tls.sh
+  # need a dcmqrscp with TLS options, that is, DCMTK 3.6.9 or later.

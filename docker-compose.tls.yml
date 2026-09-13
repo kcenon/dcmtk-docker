@@ -1,10 +1,12 @@
 # TLS overlay - serve the primary PACS over authenticated secure DICOM.
 #
-# IMPORTANT: the stock Debian apt dcmtk package is NOT linked against OpenSSL, so
-# dcmqrscp rejects +tls ("Unknown option +tls"). On such an image the entrypoint
+# IMPORTANT: this overlay needs a dcmqrscp with TLS options, which DCMTK added in
+# 3.6.9. The image installs Debian bookworm's dcmtk 3.6.7: the package is built
+# with OpenSSL (storescp, storescu, echoscu, and findscu accept +tls), but its
+# dcmqrscp has no TLS options and rejects +tls. On this image the entrypoint
 # refuses to start (exit 1) with a clear error rather than deadlocking or silently
-# downgrading to cleartext. Use a TLS-capable (source-built / OpenSSL-linked) dcmtk
-# image for this overlay to actually serve TLS.
+# downgrading to cleartext. Rebuilding DCMTK 3.6.7 with OpenSSL would not help;
+# the image needs DCMTK 3.6.9 or later (for example Debian trixie's dcmtk).
 #
 #   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
 #   docker compose -f docker-compose.yml -f docker-compose.tls.yml \
@@ -24,9 +26,9 @@ services:
     volumes:
       - tls-certs:/dicom/certs
     # Health is proven over TLS using the generated client certificate. This probe
-    # requires a TLS-capable image; on a non-TLS image the entrypoint exits 1 before
-    # the probe runs, so the failure surfaces as a stopped container (clear error),
-    # not a hung healthcheck.
+    # needs a dcmqrscp with TLS options (DCMTK 3.6.9 or later); on this image the
+    # entrypoint exits 1 before the probe runs, so the failure surfaces as a
+    # container that exits with an explicit error, not a hung healthcheck.
     healthcheck:
       test: ["CMD-SHELL", "echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem +cf /dicom/certs/ca-cert.pem -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
       interval: 10s

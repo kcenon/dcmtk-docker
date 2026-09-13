@@ -523,16 +523,18 @@ docker compose down -v
 | C-ECHO/STORE/FIND/MOVE | Yes | Yes |
 | dump2dcm | Yes | Yes |
 | img2dcm | Yes | Yes |
-| TLS support | **No** (not OpenSSL-linked) | Yes |
+| TLS in `dcmqrscp` | **No** (added in DCMTK 3.6.9) | Yes |
+| TLS in `storescp`, `storescu`, `echoscu`, `findscu` | Yes (built with OpenSSL) | Yes |
 | DICOMweb | No | No (not a DCMTK feature) |
 | JSON export | Limited | Improved |
 
 > Correction (TLS skip path verified in CI): the Debian Bookworm apt `dcmtk`
-> package is **not** linked against OpenSSL, so `dcmqrscp +tls` fails with
-> "Unknown option +tls". TLS therefore requires a TLS-capable (source-built /
-> OpenSSL-linked) dcmtk image; the shipped TLS profile refuses to start (exit 1)
-> rather than silently downgrading to cleartext. All other planned functionality
-> works on the apt build.
+> package is built with OpenSSL (`libdcmtk17` depends on `libssl3`), but DCMTK
+> 3.6.7's `dcmqrscp` has no TLS options, so it rejects `+tls`. DCMTK added TLS
+> to `dcmqrscp` in 3.6.9 for incoming associations and completed it for C-MOVE
+> in 3.7.0. The shipped TLS profile therefore refuses to start (exit 1) on this
+> image rather than silently downgrading to cleartext. All other planned
+> functionality works on the apt build.
 
 ### Platform-Specific Concerns
 

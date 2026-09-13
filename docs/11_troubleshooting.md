@@ -32,14 +32,19 @@ C-MOVE requires the destination AE to be registered in the PACS HostTable.
 
 ## "No such SOP Class" / Transfer syntax errors
 
-DCMTK 3.6.7 supports standard uncompressed transfer syntaxes. If storing files with
-exotic compression, convert first:
+The PACS servers accept only uncompressed transfer syntaxes: the entrypoint
+starts `dcmqrscp` with its default preference (`+x=`). Decompress a file before
+storing it. `dcmconv` cannot decode compressed pixel data, so use the decoder
+that matches the compression:
 
 ```bash
-# Convert to Explicit VR Little Endian
+# JPEG (use dcmdjpls for JPEG-LS and dcmdrle for RLE)
 docker compose exec test-client \
-    dcmconv +te /dicom/testdata/compressed.dcm /dicom/testdata/uncompressed.dcm
+    dcmdjpeg /dicom/testdata/compressed.dcm /dicom/testdata/uncompressed.dcm
 ```
+
+The image has no JPEG 2000 decoder; convert JPEG 2000 files with another
+toolkit first.
 
 ## Tests fail with "0 studies found"
 

@@ -91,12 +91,12 @@ data — not a drop-in replacement for a full clinical archive.
 | Uncompressed transfer syntaxes | ✅ | Implicit VR LE, Explicit VR LE, Explicit VR BE |
 | AE-title access control | ✅ | Opt-in restricted (whitelist) profile |
 | Non-root container | ✅ | Network-facing PACS/receiver services run as the unprivileged `pacs` user (the test-client helper runs as root for host-mounted writes) |
-| Compressed transfer syntaxes (JPEG / JPEG-LS / JPEG2000 / RLE) | ❌ | Stock Debian `dcmtk` ships no codec libraries |
+| Compressed transfer syntaxes (JPEG / JPEG-LS / JPEG2000 / RLE) | ❌ | Not accepted: the entrypoint starts `dcmqrscp` with its default preference (`+x=`), which accepts only uncompressed syntaxes. The image has the JPEG, JPEG-LS, and RLE codec tools (`dcmcjpeg`, `dcmcjpls`, `dcmcrle`, and their decoders) but no JPEG 2000 codec |
 | DICOMweb (WADO-RS / QIDO-RS / STOW-RS) | ❌ | Not a DCMTK feature |
 | Modality Worklist (MWL) | ✅ | Served by `wlmscpfs` (`mwl-server`); query with `findscu -W` |
 | MPPS | ❌ | DCMTK ships no MPPS SCP — use Orthanc / dcm4chee |
 | Storage Commitment | ❌ | DCMTK ships no Storage-Commitment SCP — use dcm4chee |
-| TLS / secure transport | ⚠️ | TLS profile (`docker-compose.tls.yml`) is ready, but stock Debian apt `dcmtk` is not OpenSSL-linked (`+tls` unsupported); needs a TLS-capable dcmtk image |
+| TLS / secure transport | ⚠️ | The Debian package is built with OpenSSL, and `storescp`, `storescu`, `echoscu`, and `findscu` accept `+tls`. `dcmqrscp` has TLS options only from DCMTK 3.6.9, so on this image (3.6.7) the TLS overlay (`docker-compose.tls.yml`) stops at startup |
 
 For DICOMweb, MPPS / Storage-Commitment workflows, or compressed pixel data,
 reach for [Orthanc](https://www.orthanc-server.com/) or
