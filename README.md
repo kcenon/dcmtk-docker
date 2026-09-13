@@ -32,18 +32,19 @@ Host Machine
 ┌──────────────────────────────────────────────────────────┐
 │ Docker Network: dicom-net                                │
 │                                                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │ pacs-server  │  │ pacs-server-2│  │ storescp-     │  │
-│  │ (dcmqrscp)   │  │ (dcmqrscp)   │  │ receiver      │  │
-│  │ AE:DCMTK_PACS│  │ AE:DCMTK_PAC2│  │ AE:STORE_SCP  │  │
-│  │ :11112       │  │ :11112       │  │ :11112        │  │
-│  └──────┬───────┘  └──────────────┘  └───────────────┘  │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐   │
+│  │ pacs-server  │  │ pacs-server-2│  │ storescp-     │   │
+│  │ (dcmqrscp)   │  │ (dcmqrscp)   │  │ receiver      │   │
+│  │ AE:DCMTK_PACS│  │ AE:DCMTK_PAC2│  │ AE:STORE_SCP  │   │
+│  │ :11112       │  │ :11112       │  │ :11112        │   │
+│  └──────┬───────┘  └──────────────┘  └───────────────┘   │
 │         │ C-ECHO/STORE/FIND/MOVE                         │
-│  ┌──────┴───────┐                                        │
-│  │ test-client  │                                        │
-│  │ (SCU tools)  │                                        │
-│  │ AE:TEST_SCU  │                                        │
-│  └──────────────┘                                        │
+│  ┌──────┴───────┐                    ┌───────────────┐   │
+│  │ test-client  │  C-FIND (MWL)      │ mwl-server    │   │
+│  │ (SCU tools)  ├───────────────────>│ (wlmscpfs)    │   │
+│  │ AE:TEST_SCU  │                    │ AE:DCMTK_WLM  │   │
+│  └──────────────┘                    │ :11112        │   │
+│                                      └───────────────┘   │
 └──────────────────────────────────────────────────────────┘
   Host ports:  :11112  :11113  :11114  :11115
 ```
@@ -480,7 +481,9 @@ cp env.default .env
 | `PACS2_HOST_PORT` | `11113` | Secondary PACS host port |
 | `STORESCP_AE_TITLE` | `STORE_SCP` | Store SCP receiver AE Title |
 | `STORESCP_HOST_PORT` | `11114` | Store SCP receiver host port |
+| `WLM_AE_TITLE` | `DCMTK_WLM` | Modality Worklist SCP AE Title |
 | `WLM_HOST_PORT` | `11115` | Modality Worklist SCP host port |
+| `WLM_STATION_AE` | `MODALITY01` | Scheduled Station AE Title `(0040,0001)` written into the generated worklist items |
 | `TEST_SCU_AE_TITLE` | `TEST_SCU` | Test client AE Title |
 | `PACS_BIND_ADDR` | `0.0.0.0` | Host interface the published ports bind to. Set to e.g. `127.0.0.1` to expose ports only to the local host (see Security Notes) |
 | `DICOM_PORT` | `11112` | Internal container DICOM port |
@@ -489,6 +492,9 @@ cp env.default .env
 | `MAX_STUDIES` | `200` | Maximum studies per storage area |
 | `MAX_BYTES_PER_STUDY` | `1024mb` | Maximum bytes per study |
 | `LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
+| `DICOM_MEM_LIMIT` | `512m` | Memory limit (`mem_limit`) for each service container |
+| `DICOM_CPUS` | `1.0` | CPU limit (`cpus`) for each service container |
+| `EXTRA_PEERS` | (empty) | Ad-hoc C-MOVE destinations for both PACS servers, space-separated `name=AE:host:port`; `./pacs.sh add-peer` appends to it in `.env` |
 | `GENERATE_TEST_DATA` | `true` | Generate synthetic data on startup |
 | `GENERATE_PIXEL_DATA` | `false` | Embed modality-realistic synthetic PixelData in generated files |
 | `PIXEL_DATA_PROFILE` | `conservative` | `conservative` (CT 128, MR 128, CR 224) or `realistic` (CT 512, MR 256, CR 1024) |
@@ -668,7 +674,7 @@ restricted mode is purely an opt-in compose override (see
 ## Project Structure
 
 ```
-dcmtk_docker/
+dcmtk-docker/
 ├── pacs.sh                             # CLI wrapper (./pacs.sh help)
 ├── Dockerfile                          # Single image: debian:bookworm-slim + DCMTK (non-root)
 ├── docker-compose.yml                  # 5 services, 1 network, 4 volumes
@@ -677,6 +683,7 @@ dcmtk_docker/
 ├── env.default                         # Default environment values (copy to .env)
 ├── VERSION                             # Project version (single source of truth)
 ├── CHANGELOG.md                        # Release history (Keep a Changelog)
+├── RELEASE.md                          # Release process (develop to main, tagging)
 ├── LICENSE                             # MIT license
 ├── .dockerignore                       # Build context exclusions
 ├── README.md                           # This file
@@ -711,6 +718,7 @@ dcmtk_docker/
 │   ├── test-restricted-mode.sh         # AE-whitelist rejection tests
 │   ├── test-worklist.sh                # Modality Worklist (findscu -W) tests
 │   ├── test-adhoc-peers.sh             # Ad-hoc C-MOVE peer injection tests
+│   ├── test-adhoc-cmove.sh             # Ad-hoc C-MOVE end-to-end delivery test
 │   ├── test-tls.sh                     # TLS secure-transport tests
 │   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
