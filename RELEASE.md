@@ -56,6 +56,21 @@ what the changelog describes.
 
 ## Verifying after a release
 
+The Test Isolation workflow reports its existing check names on every pull
+request to `develop` or `main`, including documentation and version-only
+changes. A first job classifies the changed paths. Each matrix entry and other
+test job still runs, but skips its Docker steps for documentation-only changes.
+A failed path decision fails the dependent checks rather than approving a skip.
+Unknown paths conservatively run the runtime tests; manual dispatch runs them
+all. Runtime changes, including `pacs.sh`, `env.default`, `patches/`, and Compose
+files, run the usual suites. Required check names and branch protections remain
+unchanged. This avoids the missing-context block on release metadata PRs (#108).
+
+The classifier's host tests cover documentation, runtime, workflow and mixed
+changes, renames, divergent PR bases, and invalid commits. `actionlint` validates
+the workflow expressions. These local checks do not substitute for inspecting
+the actual GitHub Actions results on a pull request before merging.
+
 ```bash
 git show main:VERSION          # the new X.Y.Z
 git describe --tags            # vX.Y.Z

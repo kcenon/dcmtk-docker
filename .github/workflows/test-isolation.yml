@@ -6,67 +6,88 @@ name: Test Isolation
 # stack down with volumes wiped. Any cross-script ordering dependency
 # would surface here as a failed job.
 
+# Every PR must report each required context, including documentation-only PRs.
 on:
   pull_request:
     branches: [develop, main]
-    paths:
-      - 'tests/**'
-      - 'docker-compose.yml'
-      - 'docker-compose.restricted.yml'
-      - 'docker-compose.tls.yml'
-      - 'Dockerfile'
-      - 'patches/**'
-      - 'scripts/**'
-      - 'config/**'
-      - '.github/workflows/test-isolation.yml'
   push:
     branches: [develop, main]
-    paths:
-      - 'tests/**'
-      - 'docker-compose.yml'
-      - 'docker-compose.restricted.yml'
-      - 'docker-compose.tls.yml'
-      - 'Dockerfile'
-      - 'patches/**'
-      - 'scripts/**'
-      - 'config/**'
-      - '.github/workflows/test-isolation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
+  changes:
+    name: classify changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.paths.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide whether Docker tests are required
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/ci_runtime_changes.py --event "$EVENT_NAME" \
+            --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
   test-storage-integrity:
     name: concurrent storage and recovery integrity
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       GENERATE_PIXEL_DATA: 'true'
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.runtime == 'true'
       - name: Start isolated stack
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           cp env.default .env
           docker compose up -d --build --wait --wait-timeout 120
       - name: Verify concurrency, bidirectional transfer, and recovery
+        if: needs.changes.outputs.runtime == 'true'
         run: bash scripts/test-storage-recovery.sh
       - name: Collect integrity evidence
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: |
           docker compose logs --no-color > storage-integrity-server.log
           docker compose exec -T test-client sh -c \
             "find /tmp -maxdepth 1 -type d -name 'concurrent-store-*' -print0 | tar --null -T - -czf -" \
             > storage-integrity-workspaces.tgz
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         with:
           name: storage-integrity-evidence
           path: |
             storage-integrity-server.log
             storage-integrity-workspaces.tgz
       - name: Tear down isolated stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose down -v
 
   test-isolation:
     name: ${{ matrix.test }} (isolated)
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -81,19 +102,33 @@ jobs:
           - test-transfer-syntax.sh
           - test-load-smoke.sh
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - name: Checkout
+        if: needs.changes.outputs.runtime == 'true'
         uses: actions/checkout@v4
 
       - name: Stage .env from defaults
+        if: needs.changes.outputs.runtime == 'true'
         run: cp env.default .env
 
       - name: Build and start stack
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose up -d --build
           # Give services a moment to settle past their start_period
           sleep 5
 
       - name: Wait for all SCP services to be healthy
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           services="pacs-server pacs-server-2 storescp-receiver mwl-server"
           for i in $(seq 1 60); do
@@ -141,7 +176,7 @@ jobs:
         # unless a .indexed marker exists. After wiping storage we recreate
         # the marker so the restart leaves PACS empty rather than re-
         # populating it from /dicom/testdata. See scripts/entrypoint.sh.
-        if: matrix.test == 'test-store.sh'
+        if: needs.changes.outputs.runtime == 'true' && (matrix.test == 'test-store.sh')
         run: |
           for svc in pacs-server pacs-server-2; do
             docker compose exec -T "$svc" sh -c '
@@ -152,20 +187,24 @@ jobs:
           done
           docker compose restart pacs-server pacs-server-2
           for i in $(seq 1 60); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            cid=$(docker compose ps -q pacs-server)
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo "starting")
             if [ "$status" = "healthy" ]; then
               echo "pacs-server healthy after cleanup"
               break
             fi
+            echo "waiting for PACS after cleanup (attempt $i/60)"
             sleep 2
           done
+          test "$status" = healthy
 
       - name: Run ${{ matrix.test }} in isolation
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose exec -T test-client /tests/${{ matrix.test }}
 
       - name: Dump logs on failure
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |
           echo "=== pacs-server logs ==="
           docker compose logs pacs-server || true
@@ -177,17 +216,31 @@ jobs:
           docker compose logs test-client || true
 
       - name: Tear down stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose down -v
 
   test-pixeldata:
     name: test-pixeldata.sh with GENERATE_PIXEL_DATA=true
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - name: Checkout
+        if: needs.changes.outputs.runtime == 'true'
         uses: actions/checkout@v4
 
       - name: Stage .env from defaults with PixelData enabled
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           cp env.default .env
           # Flip the opt-in switch and verify it took
@@ -195,11 +248,13 @@ jobs:
           grep '^GENERATE_PIXEL_DATA=true' .env
 
       - name: Build and start stack
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose up -d --build
           sleep 5
 
       - name: Wait for all SCP services to be healthy
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           services="pacs-server pacs-server-2 storescp-receiver mwl-server"
           for i in $(seq 1 60); do
@@ -238,39 +293,57 @@ jobs:
           exit 1
 
       - name: Run test-pixeldata.sh
+        if: needs.changes.outputs.runtime == 'true'
         run: docker compose exec -T -e GENERATE_PIXEL_DATA=true test-client /tests/test-pixeldata.sh
 
       - name: Verify findscu/movescu still recognize the files
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose exec -T test-client /tests/test-find.sh
           docker compose exec -T test-client /tests/test-move.sh
 
       - name: Dump logs on failure
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |
           docker compose logs pacs-server || true
           docker compose logs test-client || true
 
       - name: Tear down stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose down -v
 
   test-store-idempotency:
     name: test-store.sh twice (idempotency)
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - name: Checkout
+        if: needs.changes.outputs.runtime == 'true'
         uses: actions/checkout@v4
 
       - name: Stage .env from defaults
+        if: needs.changes.outputs.runtime == 'true'
         run: cp env.default .env
 
       - name: Build and start stack
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose up -d --build
           sleep 5
 
       - name: Wait for all SCP services to be healthy
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           services="pacs-server pacs-server-2 storescp-receiver mwl-server"
           for i in $(seq 1 60); do
@@ -309,6 +382,7 @@ jobs:
           exit 1
 
       - name: Wipe PACS storage on the host before first run
+        if: needs.changes.outputs.runtime == 'true'
         # The PACS entrypoint indexes synthetic test data on first boot,
         # so the volumes are dirty even before any storescu. Cleanup must
         # run on the host (the test-client image has no Docker CLI). See
@@ -328,18 +402,23 @@ jobs:
           done
           docker compose restart pacs-server pacs-server-2
           for i in $(seq 1 60); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            cid=$(docker compose ps -q pacs-server)
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo "starting")
             if [ "$status" = "healthy" ]; then
               echo "pacs-server healthy after cleanup"
               break
             fi
+            echo "waiting for PACS after cleanup (attempt $i/60)"
             sleep 2
           done
+          test "$status" = healthy
 
       - name: First test-store.sh run
+        if: needs.changes.outputs.runtime == 'true'
         run: docker compose exec -T test-client /tests/test-store.sh
 
       - name: Wipe PACS storage on the host between runs
+        if: needs.changes.outputs.runtime == 'true'
         # Same marker trick as before to keep the second run starting from
         # an empty PACS. See the comment on the first wipe step.
         run: |
@@ -352,43 +431,63 @@ jobs:
           done
           docker compose restart pacs-server pacs-server-2
           for i in $(seq 1 60); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            cid=$(docker compose ps -q pacs-server)
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo "starting")
             if [ "$status" = "healthy" ]; then
               echo "pacs-server healthy after cleanup"
               break
             fi
+            echo "waiting for PACS after cleanup (attempt $i/60)"
             sleep 2
           done
+          test "$status" = healthy
 
       - name: Second test-store.sh run (must also pass)
+        if: needs.changes.outputs.runtime == 'true'
         run: docker compose exec -T test-client /tests/test-store.sh
 
       - name: Dump logs on failure
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |
           docker compose logs pacs-server || true
           docker compose logs test-client || true
 
       - name: Tear down stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose down -v
 
   test-aggregator:
     name: test-all.sh aggregator (green-on-failure guard)
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - name: Checkout
+        if: needs.changes.outputs.runtime == 'true'
         uses: actions/checkout@v4
 
       - name: Stage .env from defaults
+        if: needs.changes.outputs.runtime == 'true'
         run: cp env.default .env
 
       - name: Build and start stack
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose up -d --build
           sleep 5
 
       - name: Wait for all SCP services to be healthy
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           services="pacs-server pacs-server-2 storescp-receiver mwl-server"
           for i in $(seq 1 60); do
@@ -427,9 +526,11 @@ jobs:
           exit 1
 
       - name: Verify load smoke rejects injected faults
+        if: needs.changes.outputs.runtime == 'true'
         run: bash scripts/test-load-verdict.sh
 
       - name: Wipe PACS storage so the aggregator's C-STORE suite starts empty
+        if: needs.changes.outputs.runtime == 'true'
         # test-all.sh runs test-store.sh, which requires an empty PACS
         # (ensure_clean_pacs) so its >= 3 study-count check is meaningful. The
         # entrypoint indexes synthetic data on first boot, so wipe on the host
@@ -445,51 +546,69 @@ jobs:
           done
           docker compose restart pacs-server pacs-server-2
           for i in $(seq 1 60); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' pacs-server 2>/dev/null || echo "starting")
+            cid=$(docker compose ps -q pacs-server)
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo "starting")
             if [ "$status" = "healthy" ]; then
               echo "pacs-server healthy after cleanup"
               break
             fi
+            echo "waiting for PACS after cleanup (attempt $i/60)"
             sleep 2
           done
+          test "$status" = healthy
 
       - name: Run the full aggregator and assert exit 0
+        if: needs.changes.outputs.runtime == 'true'
         # Exercises test-all.sh's own verdict logic (the SUITES_FAILED gate),
         # which the per-script isolation jobs never cover. A green-on-failure
         # regression in the aggregator would fail this job.
         run: docker compose exec -T test-client /tests/test-all.sh
 
       - name: Dump logs on failure
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |
           docker compose logs pacs-server || true
           docker compose logs test-client || true
 
       - name: Collect load integrity diagnostics
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |
           docker compose exec -T test-client sh -c \
             "find /tmp -maxdepth 1 -type d -name 'load-smoke-*' -print0 | tar --null -T - -czf -" \
             > load-integrity-diagnostics.tgz
 
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         with:
           name: load-integrity-diagnostics
           path: load-integrity-diagnostics.tgz
 
       - name: Tear down stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose down -v
 
   test-adhoc-cmove:
     name: ad-hoc C-MOVE delivery (EXTRA_PEERS e2e)
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - name: Checkout
+        if: needs.changes.outputs.runtime == 'true'
         uses: actions/checkout@v4
 
       - name: Stage .env with an EXTRA_PEERS-only destination
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           cp env.default .env
           # Register storescp-receiver under a NEW AE (ADHOC_SCP) that is NOT in
@@ -499,11 +618,13 @@ jobs:
           grep '^EXTRA_PEERS=adhoc=ADHOC_SCP:storescp-receiver:11112' .env
 
       - name: Build and start stack
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose up -d --build
           sleep 5
 
       - name: Wait for all SCP services to be healthy
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           services="pacs-server pacs-server-2 storescp-receiver mwl-server"
           for i in $(seq 1 60); do
@@ -542,35 +663,52 @@ jobs:
           exit 1
 
       - name: C-MOVE to the EXTRA_PEERS-only destination and verify arrival
+        if: needs.changes.outputs.runtime == 'true'
         run: docker compose exec -T -e ADHOC_DEST_AE=ADHOC_SCP test-client /tests/test-adhoc-cmove.sh
 
       - name: Dump logs on failure
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |
           docker compose logs pacs-server || true
           docker compose logs storescp-receiver || true
           docker compose logs test-client || true
 
       - name: Tear down stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose down -v
 
   test-tls-skip:
     name: test-tls.sh skips cleanly on the cleartext stack
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - name: Checkout
+        if: needs.changes.outputs.runtime == 'true'
         uses: actions/checkout@v4
 
       - name: Stage .env from defaults
+        if: needs.changes.outputs.runtime == 'true'
         run: cp env.default .env
 
       - name: Build and start stack
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose up -d --build
           sleep 5
 
       - name: Assert test-tls.sh skips on the cleartext stack
+        if: needs.changes.outputs.runtime == 'true'
         # test-tls.sh checks TLS_ENABLED before touching any SCP, so the default
         # (cleartext) stack must make it skip with exit 0. Proving the skip path
         # still works guards against a silent regression in its guards. There is
@@ -584,6 +722,7 @@ jobs:
           echo "OK: test-tls.sh skipped cleanly"
 
       - name: Confirm the DCMTK facts behind the TLS and codec docs
+        if: needs.changes.outputs.runtime == 'true'
         # README.md, docs/05, docs/08, docs/10, and docker-compose.tls.yml say
         # that this image's dcmqrscp has no TLS options while storescp and
         # echoscu have them, and that the dcmtk package ships the JPEG,
@@ -608,6 +747,7 @@ jobs:
           fi
 
       - name: Assert the TLS overlay refuses to start on this image
+        if: needs.changes.outputs.runtime == 'true'
         # With TLS_ENABLED=true the entrypoint must exit 1 with its explicit
         # error instead of serving cleartext, because this image's dcmqrscp
         # has no TLS options (#59, #104). GENERATE_TEST_DATA=false skips the
@@ -630,30 +770,46 @@ jobs:
           echo "OK: the TLS overlay refuses to start on this image"
 
       - name: Dump logs on failure
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: docker compose logs test-client || true
 
       - name: Tear down stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose -f docker-compose.yml -f docker-compose.tls.yml down -v
 
   test-restricted-mode:
     name: restricted-mode AE whitelist (negative tests)
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this required context completes without Docker.'
       - name: Checkout
+        if: needs.changes.outputs.runtime == 'true'
         uses: actions/checkout@v4
 
       - name: Stage .env from defaults
+        if: needs.changes.outputs.runtime == 'true'
         run: cp env.default .env
 
       - name: Build and start the restricted overlay
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d --build
           # Give services a moment to settle past their start_period
           sleep 5
 
       - name: Wait for all SCP services to be healthy
+        if: needs.changes.outputs.runtime == 'true'
         run: |
           services="pacs-server pacs-server-2 storescp-receiver mwl-server"
           for i in $(seq 1 60); do
@@ -692,10 +848,11 @@ jobs:
           exit 1
 
       - name: Run test-restricted-mode.sh against the restricted overlay
+        if: needs.changes.outputs.runtime == 'true'
         run: docker compose exec -T test-client /tests/test-restricted-mode.sh
 
       - name: Dump logs on failure
-        if: failure()
+        if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |
           echo "=== pacs-server logs ==="
           docker compose logs pacs-server || true
@@ -707,7 +864,7 @@ jobs:
           docker compose logs test-client || true
 
       - name: Tear down stack
-        if: always()
+        if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose -f docker-compose.yml -f docker-compose.restricted.yml down -v
 
   # NOTE: the test-tls-skip job above exercises tests/test-tls.sh's skip path on
