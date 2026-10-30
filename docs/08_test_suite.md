@@ -63,7 +63,7 @@ functional suites do not cover.
 # Defaults are conservative so the suite stays inside ~1-2 min of CI budget
 ./pacs.sh test load-smoke
 
-# Probe a heavier mix (e.g. saturate the default MAX_ASSOCIATIONS=16 ceiling)
+# Probe a heavier mix below the default MAX_ASSOCIATIONS=16 ceiling
 LOAD_SMOKE_PARALLEL=4 LOAD_SMOKE_REPEAT=3 ./pacs.sh test load-smoke
 ```
 
@@ -73,6 +73,10 @@ LOAD_SMOKE_PARALLEL=4 LOAD_SMOKE_REPEAT=3 ./pacs.sh test load-smoke
 | `LOAD_SMOKE_REPEAT` | `2` | Iterations of `storescu` per worker |
 | `LOAD_SMOKE_TIMEOUT` | `60` | Per-association timeout in seconds |
 | `LOAD_SMOKE_FIND_REPS` | `5` | Concurrent `findscu` iterations (0 disables the probe) |
+
+`pacs.sh test` forwards these four variables from the invoking environment
+to the running test container, including when running `test all`. Unset
+variables retain the test script's defaults; no container recreation is needed.
 
 The suite passes when at least half of the parallel workers complete and
 the post-load study count is at or above the pre-load baseline. Failed
