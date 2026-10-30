@@ -15,6 +15,7 @@ on:
       - 'docker-compose.restricted.yml'
       - 'docker-compose.tls.yml'
       - 'Dockerfile'
+      - 'patches/**'
       - 'scripts/**'
       - 'config/**'
       - '.github/workflows/test-isolation.yml'
@@ -26,11 +27,44 @@ on:
       - 'docker-compose.restricted.yml'
       - 'docker-compose.tls.yml'
       - 'Dockerfile'
+      - 'patches/**'
       - 'scripts/**'
       - 'config/**'
       - '.github/workflows/test-isolation.yml'
 
 jobs:
+  test-storage-integrity:
+    name: concurrent storage and recovery integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GENERATE_PIXEL_DATA: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start isolated stack
+        run: |
+          cp env.default .env
+          docker compose up -d --build --wait --wait-timeout 120
+      - name: Verify concurrency, bidirectional transfer, and recovery
+        run: bash scripts/test-storage-recovery.sh
+      - name: Collect integrity evidence
+        if: always()
+        run: |
+          docker compose logs --no-color > storage-integrity-server.log
+          docker compose exec -T test-client sh -c \
+            "find /tmp -maxdepth 1 -type d -name 'concurrent-store-*' -print0 | tar --null -T - -czf -" \
+            > storage-integrity-workspaces.tgz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: storage-integrity-evidence
+          path: |
+            storage-integrity-server.log
+            storage-integrity-workspaces.tgz
+      - name: Tear down isolated stack
+        if: always()
+        run: docker compose down -v
+
   test-isolation:
     name: ${{ matrix.test }} (isolated)
     runs-on: ubuntu-latest

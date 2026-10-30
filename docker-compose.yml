@@ -208,6 +208,15 @@ services:
       # (count + DICOM UID match) instead of relying on movescu exit
       # codes alone. See issue #33.
       - received-data:/dicom/received
+      # Read-only inventories for concurrent storage integrity regressions.
+      - pacs-data:/dicom/primary-db:ro
+      - pacs2-data:/dicom/secondary-db:ro
+    # Container startup alone does not mean synthetic fixtures are complete.
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/dcmtk-test-client.ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 120
     networks:
       - dicom-net
     depends_on:
