@@ -32,6 +32,27 @@ log_info()  { echo "[entrypoint] INFO:  $*"; }
 log_warn()  { echo "[entrypoint] WARN:  $*" >&2; }
 log_error() { echo "[entrypoint] ERROR: $*" >&2; }
 
+# Explicit presets keep command arguments separate and preserve the default.
+INCOMING_TS=()
+OUTGOING_TS=()
+configure_transfer_syntax() {
+    case "${DICOM_TRANSFER_SYNTAX:-uncompressed}" in
+        uncompressed) ;;
+        jpeg-lossless)    INCOMING_TS=(+xs) ;;
+        jpeg-ls-lossless) INCOMING_TS=(+xt) ;;
+        rle-lossless)     INCOMING_TS=(+xr) ;;
+        *) log_error "Invalid DICOM_TRANSFER_SYNTAX: ${DICOM_TRANSFER_SYNTAX}"; exit 1 ;;
+    esac
+    case "${DICOM_MOVE_TRANSFER_SYNTAX:-uncompressed}" in
+        uncompressed) ;;
+        jpeg-lossless)    OUTGOING_TS=(-xs) ;;
+        jpeg-ls-lossless) OUTGOING_TS=(-xt) ;;
+        rle-lossless)     OUTGOING_TS=(-xr) ;;
+        *) log_error "Invalid DICOM_MOVE_TRANSFER_SYNTAX: ${DICOM_MOVE_TRANSFER_SYNTAX}"; exit 1 ;;
+    esac
+
+}
+
 # ── Generate test data ───────────────────────────────
 maybe_generate_test_data() {
     if [ "${GENERATE_TEST_DATA}" = "true" ]; then
@@ -46,6 +67,7 @@ maybe_generate_test_data() {
 
 # ── Role: pacs-server (dcmqrscp) ────────────────────
 start_pacs_server() {
+    configure_transfer_syntax
     log_info "Starting PACS server: AE_TITLE=${AE_TITLE}, PORT=${DICOM_PORT}"
 
     # Create storage directory for this AE
@@ -121,6 +143,7 @@ start_pacs_server() {
             fi
             log_info "Starting dcmqrscp with TLS on port ${DICOM_PORT}..."
             exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" \
+                "${INCOMING_TS[@]}" "${OUTGOING_TS[@]}" \
                 +tls "${cert_dir}/server-key.pem" "${cert_dir}/server-cert.pem" \
                 +cf "${cert_dir}/ca-cert.pem" \
                 -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"
@@ -134,17 +157,20 @@ start_pacs_server() {
 
     log_info "Starting dcmqrscp on port ${DICOM_PORT}..."
     exec dcmqrscp --log-level "${DCMTK_LOG_LEVEL}" \
+                "${INCOMING_TS[@]}" "${OUTGOING_TS[@]}" \
         -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"
 }
 
 # ── Role: storescp (C-STORE receiver) ────────────────
 start_storescp() {
+    configure_transfer_syntax
     log_info "Starting Store SCP: AE_TITLE=${AE_TITLE}, PORT=${DICOM_PORT}"
 
     mkdir -p "${STORAGE_DIR}"
 
     log_info "Starting storescp on port ${DICOM_PORT}..."
     exec storescp --log-level "${DCMTK_LOG_LEVEL}" \
+        "${INCOMING_TS[@]}" \
         --output-directory "${STORAGE_DIR}" \
         --aetitle "${AE_TITLE}" \
         --sort-on-study-uid prefix \

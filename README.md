@@ -82,8 +82,8 @@ The `ROLE` environment variable selects which service to run.
 ## Capabilities
 
 This is a **classic-DIMSE test PACS** built on DCMTK `dcmqrscp`. It is purpose-built
-for deterministic, isolated testing of DICOM network (DIMSE) clients on uncompressed
-data — not a drop-in replacement for a full clinical archive.
+for deterministic, isolated testing of DICOM network (DIMSE) clients. It supports
+uncompressed data by default and opt-in lossless compressed transfer syntaxes.
 
 | Capability | Status | Notes |
 |------------|:------:|-------|
@@ -95,14 +95,14 @@ data — not a drop-in replacement for a full clinical archive.
 | Uncompressed transfer syntaxes | ✅ | Implicit VR LE, Explicit VR LE, Explicit VR BE |
 | AE-title access control | ✅ | Opt-in restricted (whitelist) profile |
 | Non-root container | ✅ | Network-facing PACS/receiver services run as the unprivileged `pacs` user (the test-client helper runs as root for host-mounted writes) |
-| Compressed transfer syntaxes (JPEG / JPEG-LS / JPEG2000 / RLE) | ❌ | Not accepted: the entrypoint starts `dcmqrscp` with its default preference (`+x=`), which accepts only uncompressed syntaxes. The image has the JPEG, JPEG-LS, and RLE codec tools (`dcmcjpeg`, `dcmcjpls`, `dcmcrle`, and their decoders) but no JPEG 2000 codec |
+| Lossless compressed transfer syntaxes | ✅ | Opt-in `DICOM_TRANSFER_SYNTAX` presets for JPEG Lossless, JPEG-LS Lossless, and RLE; CI verifies negotiated C-STORE, compressed C-MOVE and decoded PixelData. No JPEG 2000 codec |
 | DICOMweb (WADO-RS / QIDO-RS / STOW-RS) | ❌ | Not a DCMTK feature |
 | Modality Worklist (MWL) | ✅ | Served by `wlmscpfs` (`mwl-server`); query with `findscu -W` |
 | MPPS | ❌ | DCMTK ships no MPPS SCP — use Orthanc / dcm4chee |
 | Storage Commitment | ❌ | DCMTK ships no Storage-Commitment SCP — use dcm4chee |
 | TLS / secure transport | ✅ | The TLS overlay serves incoming associations using DCMTK 3.6.9 with OpenSSL; CI checks secure C-ECHO and plaintext rejection. Outgoing C-MOVE stays cleartext; `movescu` and `wlmscpfs` have no TLS options |
 
-For DICOMweb, MPPS / Storage-Commitment workflows, or compressed pixel data,
+For DICOMweb or MPPS / Storage-Commitment workflows,
 reach for [Orthanc](https://www.orthanc-server.com/) or
 [dcm4chee-arc-light](https://github.com/dcm4che/dcm4chee-arc-light).
 

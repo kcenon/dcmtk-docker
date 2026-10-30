@@ -16,6 +16,8 @@ services:
       - ALL
     environment:
       - ROLE=pacs-server
+      - DICOM_TRANSFER_SYNTAX=${DICOM_TRANSFER_SYNTAX:-uncompressed}
+      - DICOM_MOVE_TRANSFER_SYNTAX=${DICOM_MOVE_TRANSFER_SYNTAX:-uncompressed}
       - AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
       - DICOM_PORT=${DICOM_PORT:-11112}
       - STORAGE_DIR=/dicom/db
@@ -69,6 +71,8 @@ services:
       - ALL
     environment:
       - ROLE=pacs-server
+      - DICOM_TRANSFER_SYNTAX=${DICOM_TRANSFER_SYNTAX:-uncompressed}
+      - DICOM_MOVE_TRANSFER_SYNTAX=${DICOM_MOVE_TRANSFER_SYNTAX:-uncompressed}
       - AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}
       - DICOM_PORT=${DICOM_PORT:-11112}
       - STORAGE_DIR=/dicom/db
@@ -112,6 +116,8 @@ services:
       - ALL
     environment:
       - ROLE=storescp
+      - DICOM_TRANSFER_SYNTAX=${DICOM_TRANSFER_SYNTAX:-uncompressed}
+      - DICOM_MOVE_TRANSFER_SYNTAX=${DICOM_MOVE_TRANSFER_SYNTAX:-uncompressed}
       - AE_TITLE=${STORESCP_AE_TITLE:-STORE_SCP}
       - DICOM_PORT=${DICOM_PORT:-11112}
       - STORAGE_DIR=/dicom/received
@@ -177,6 +183,8 @@ services:
     cpus: ${DICOM_CPUS:-1.0}
     environment:
       - ROLE=test-client
+      - DICOM_TRANSFER_SYNTAX=${DICOM_TRANSFER_SYNTAX:-uncompressed}
+      - DICOM_MOVE_TRANSFER_SYNTAX=${DICOM_MOVE_TRANSFER_SYNTAX:-uncompressed}
       - AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
       - PACS_HOST=pacs-server
       - DICOM_PORT=${DICOM_PORT:-11112}

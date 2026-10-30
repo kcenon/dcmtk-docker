@@ -966,3 +966,59 @@ jobs:
       - name: Tear down test client
         if: needs.changes.outputs.runtime == 'true' && always()
         run: docker compose down -v --remove-orphans
+
+  test-compressed-syntax:
+    name: compressed syntax (${{ matrix.syntax }})
+    needs: changes
+    if: always()
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        syntax: [jpeg-lossless, jpeg-ls-lossless, rle-lossless]
+    env:
+      DICOM_TRANSFER_SYNTAX: ${{ matrix.syntax }}
+      GENERATE_PIXEL_DATA: 'true'
+    steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this context completes without Docker.'
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.runtime == 'true'
+      - name: Start with lossless syntax enabled
+        if: needs.changes.outputs.runtime == 'true'
+        run: |
+          cp env.default .env
+          docker compose up -d --build --wait --wait-timeout 120
+      - name: Run all suites including compressed round trip
+        if: needs.changes.outputs.runtime == 'true'
+        run: ./pacs.sh test all
+      - name: Verify compressed C-MOVE with matching outgoing preference
+        if: needs.changes.outputs.runtime == 'true'
+        env:
+          DICOM_MOVE_TRANSFER_SYNTAX: ${{ matrix.syntax }}
+        run: |
+          docker compose up -d --no-build --wait --wait-timeout 120
+          docker compose exec -T test-client /tests/test-transfer-syntax.sh
+      - name: Collect transfer syntax evidence
+        if: needs.changes.outputs.runtime == 'true' && always()
+        run: |
+          docker compose logs --no-color > compressed-server.log
+          docker compose exec -T test-client sh -c "find /tmp -maxdepth 1 -type d -name 'transfer-syntax-*' -print0 | tar --null -T - -czf -" > compressed-probes.tgz
+      - uses: actions/upload-artifact@v4
+        if: needs.changes.outputs.runtime == 'true' && always()
+        with:
+          name: compressed-${{ matrix.syntax }}-evidence
+          path: |
+            compressed-server.log
+            compressed-probes.tgz
+      - name: Tear down stack
+        if: needs.changes.outputs.runtime == 'true' && always()
+        run: docker compose down -v

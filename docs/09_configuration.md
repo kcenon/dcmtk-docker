@@ -91,3 +91,19 @@ For a specific still-published Debian revision, build with
 The default policy is not byte-for-byte reproducible: apt security revisions
 and dependencies can change. Retain the built image by digest for deployment
 reproducibility; an exact apt version alone cannot guarantee later rebuilds.
+
+## Lossless transfer syntax presets
+
+`DICOM_TRANSFER_SYNTAX` defaults to `uncompressed`. Opt into `jpeg-lossless`,
+`jpeg-ls-lossless`, or `rle-lossless` for PACS incoming preferences and receiver
+preferences. `DICOM_MOVE_TRANSFER_SYNTAX` has the same choices and separately
+controls PACS outgoing C-MOVE proposals; its default is also `uncompressed`.
+Recreate services after changing `.env`.
+
+The [transfer syntax suite](08_test_suite.md#transfer-syntax-compatibility)
+requires `GENERATE_PIXEL_DATA=true` for compressed cases. It checks the stored
+encoding and decoded content, plus compressed C-MOVE when both variables match.
+DCMTK 3.6.9's PACS does not transcode PixelData: compressed outgoing preferences
+are for retrievals with matching stored encodings, not mixed studies requiring
+conversion. The defaults preserve existing behavior. These presets do not add
+JPEG 2000 codecs or multiple simultaneous compressed preferences.

@@ -23,17 +23,17 @@ set -uo pipefail
 #                                                              transfer-syntax
 #                                                              registry.
 #
-# No compressed transfer syntaxes (JPEG / JPEG-LS / RLE / JPEG2000) are
-# exercised here, because the PACS accepts none: the entrypoint starts
-# dcmqrscp with its default preference (+x=), which offers only uncompressed
-# syntaxes. The image does have DCMTK's JPEG, JPEG-LS, and RLE codec tools
-# (dcmcjpeg, dcmcjpls, dcmcrle); it has no JPEG 2000 codec. dcmconv writes
-# only uncompressed and deflated syntaxes, so a compressed case needs one of
-# those tools plus a matching dcmqrscp preference option (for example +xs);
-# docs/08_test_suite.md lists the steps.
+# Optional lossless compressed cases are selected with DICOM_TRANSFER_SYNTAX.
+# Each preset must also be configured on both PACS and the C-MOVE receiver.
+# See compressed-transfer-helpers.sh for negotiation and decoded integrity checks.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/test-helpers.sh
 source "${SCRIPT_DIR}/test-helpers.sh"
+# shellcheck source=tests/integrity-helpers.sh
+source "${SCRIPT_DIR}/integrity-helpers.sh"
+# shellcheck source=tests/compressed-transfer-helpers.sh
+source "${SCRIPT_DIR}/compressed-transfer-helpers.sh"
 
 # ── Configuration ─────────────────────────────────────
 PACS_HOST="${PACS_HOST:-pacs-server}"
@@ -72,8 +72,9 @@ echo ""
 
 # ── Workspace ─────────────────────────────────────────
 WORKDIR=$(mktemp -d -t transfer-syntax-XXXXXX)
-# shellcheck disable=SC2064
-trap "rm -rf '${WORKDIR}'" EXIT
+echo "Transfer syntax evidence: ${WORKDIR}"
+RESTORE_NEEDED=false
+trap cleanup_transfer_syntax EXIT
 
 # ── Helper: assert (0002,0010) matches an expected UID ─
 assert_transfer_syntax_uid() {
@@ -84,28 +85,12 @@ assert_transfer_syntax_uid() {
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
     local dump got_uid
-    dump=$(dcmdump --search 0002,0010 --print-all "${file}" 2>/dev/null) || {
+    dump=$(dcmdump -Un +P 0002,0010 "${file}" 2>/dev/null) || {
         print_fail "Transfer Syntax: ${label} dcmdump failed (${file})"
         TEST_FAILED=$((TEST_FAILED + 1))
         return 1
     }
-    # dcmdump prints: (0002,0010) UI =LittleEndianExplicit  # 20, 1 TransferSyntaxUID
-    # or the raw UID inside square brackets. Match either form.
-    got_uid=$(echo "${dump}" | grep -m1 '(0002,0010)' \
-        | sed -nE 's/.*\[([0-9.]+)\].*/\1/p')
-
-    if [ -z "${got_uid}" ]; then
-        # Fall back to the symbolic-name form (=LittleEndianImplicit etc.)
-        # and resolve it via a small lookup table.
-        local sym
-        sym=$(echo "${dump}" | grep -m1 '(0002,0010)' \
-            | sed -nE 's/.*=([A-Za-z0-9._]+).*/\1/p')
-        case "${sym}" in
-            LittleEndianImplicit) got_uid="${TS_UID_IMPLICIT_LE}" ;;
-            LittleEndianExplicit) got_uid="${TS_UID_EXPLICIT_LE}" ;;
-            BigEndianExplicit)    got_uid="${TS_UID_EXPLICIT_BE}" ;;
-        esac
-    fi
+    got_uid=$(sed -nE '/^\(0002,0010\)/s/.*\[([0-9.]+)\].*/\1/p' <<<"${dump}")
 
     if [ "${got_uid}" = "${expected_uid}" ]; then
         print_pass "Transfer Syntax: ${label} (0002,0010)=${got_uid}"
@@ -183,6 +168,14 @@ run_case() {
 run_case "explicit-vr-le" "+te" "${TS_UID_EXPLICIT_LE}" "-xe"
 run_case "implicit-vr-le" "+ti" "${TS_UID_IMPLICIT_LE}" "-xi"
 run_case "explicit-vr-be" "+tb" "${TS_UID_EXPLICIT_BE}" "-xb"
+
+if [ "${DICOM_TRANSFER_SYNTAX:-uncompressed}" != uncompressed ]; then
+    run_compressed_case || true
+    if run_test "source instance restored after compressed round trip" "Transfer Syntax" \
+            restore_transfer_source; then
+        RESTORE_NEEDED=false
+    fi
+fi
 
 # ── Summary ──────────────────────────────────────────
 print_summary "Transfer Syntax"
