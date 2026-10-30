@@ -58,7 +58,10 @@ trap 'exit 143' TERM
 mkdir "${WORK}/fixtures"
 for modality in ct mr cr; do cp -R "${TEST_DATA_DIR:-/dicom/testdata}/${modality}" "${WORK}/fixtures/"; done
 dicom_manifest "${WORK}/same.tsv" "${WORK}/fixtures"
-[ "$(wc -l < "${WORK}/same.tsv")" -eq "${MANIFEST_TOTAL_COUNT}" ]
+[ "$(wc -l < "${WORK}/same.tsv")" -eq "${MANIFEST_TOTAL_COUNT}" ] || {
+    echo "ERROR: expected ${MANIFEST_TOTAL_COUNT} source instances; wait for test-client to become healthy" >&2
+    exit 1
+}
 mapfile -d '' FILES < <(find "${WORK}/fixtures" -name '*.dcm' -print0 | sort -z)
 for server in 0 1; do
     ensure_scp_reachable "PACS" "${HOSTS[${server}]}" "${PORTS[${server}]}" "${AES[${server}]}" "${MY_AE}"

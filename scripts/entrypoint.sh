@@ -155,11 +155,14 @@ start_storescp() {
 
 # ── Role: test-client ────────────────────────────────
 start_test_client() {
+    # A restarted container must not reuse readiness from its previous run.
+    rm -f /tmp/dcmtk-test-client.ready
     log_info "Starting test client: AE_TITLE=${AE_TITLE}"
 
     # Generate test data if enabled
     maybe_generate_test_data
 
+    touch /tmp/dcmtk-test-client.ready
     log_info "Test client ready. Available tools: echoscu, storescu, findscu, movescu, getscu"
     log_info "Container will stay alive. Use 'docker compose exec test-client <command>' to run tools."
     exec sleep infinity
