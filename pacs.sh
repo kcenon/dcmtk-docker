@@ -354,8 +354,19 @@ cmd_test() {
         script="/tests/test-${suite}.sh"
     fi
 
+    # Host environment is not inherited by an exec process in a running
+    # container. Forward only the documented load settings, when provided.
+    # Keep each assignment a single argument; never evaluate its contents.
+    local key
+    local exec_args=(-T)
+    for key in LOAD_SMOKE_PARALLEL LOAD_SMOKE_REPEAT LOAD_SMOKE_TIMEOUT LOAD_SMOKE_FIND_REPS; do
+        if [ "${!key+x}" = x ]; then
+            exec_args+=(-e "${key}=${!key}")
+        fi
+    done
+
     info "Running test suite: ${suite}"
-    ${DC} exec -T test-client bash "${script}" "$@"
+    ${DC} exec "${exec_args[@]}" test-client bash "${script}" "$@"
 }
 
 cmd_logs() {
