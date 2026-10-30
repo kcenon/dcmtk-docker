@@ -78,7 +78,7 @@ The `up` command automatically:
 
 ### What Happens on Startup
 
-1. Docker builds a single image from `Dockerfile` (debian:bookworm-slim + DCMTK 3.6.7)
+1. Docker builds a single image from `Dockerfile` (debian:trixie-slim + DCMTK 3.6.9)
 2. Four containers start, each with a different `ROLE`:
    - `pacs-server`: processes `dcmqrscp-primary.cfg.template` → starts `dcmqrscp`
    - `pacs-server-2`: processes `dcmqrscp-secondary.cfg.template` → starts `dcmqrscp`
@@ -538,52 +538,39 @@ docker compose run --rm -e ROLE=custom test-client \
 
 ### TLS-Secured DICOM (DICOM TLS)
 
-**Important:** the primary PACS cannot serve TLS on this image. The Debian
-bookworm `dcmtk` package in this image (DCMTK 3.6.7) is built with OpenSSL,
-and its `storescp`, `storescu`, `echoscu`, and `findscu` accept `+tls`. Its
-`dcmqrscp`, however, has no TLS options and rejects `+tls`: DCMTK added TLS
-to `dcmqrscp` in 3.6.9, which Debian 13 (trixie) ships. `movescu`, `getscu`,
-and `wlmscpfs` have no TLS options in 3.6.7 either. Rebuilding DCMTK 3.6.7
-with OpenSSL would not change any of this. The repository ships the wiring
-for a `dcmqrscp` that has TLS options:
+The image uses Debian trixie's DCMTK 3.6.9 with OpenSSL. The TLS overlay
+switches the primary PACS to authenticated `dcmqrscp +tls`; the other four
+services remain cleartext. Incoming storage, query, and C-GET associations
+support TLS. In 3.6.9, outgoing C-MOVE sub-associations remain cleartext and
+`movescu` has no TLS options. `wlmscpfs` also has no TLS options.
 
-- `docker-compose.tls.yml` — an overlay that switches the primary PACS to
-  authenticated `dcmqrscp +tls`.
-- `scripts/gen-certs.sh` — generates a self-signed CA + server + client
-  certificates into the shared `tls-certs` volume at container start.
-- `tests/test-tls.sh` — asserts a `+tls` C-ECHO succeeds while a plaintext
-  association is refused; it skips cleanly when TLS is not enabled or
-  `echoscu` has no TLS options.
-
-When `TLS_ENABLED=true`, the entrypoint checks whether `dcmqrscp --help` lists
-`--enable-tls`. On this image it does not, so the entrypoint **refuses to start
-(exit 1)** with a clear error rather than silently downgrading to cleartext.
-
-**Running the overlay** (it needs a `dcmqrscp` with TLS options, that is,
-DCMTK 3.6.9 or later):
+`scripts/gen-certs.sh` generates a test CA and server/client certificates in
+the shared `tls-certs` volume. These are test credentials, not production
+certificates. `tests/test-tls.sh` requires a successful authenticated C-ECHO
+and refusal of a plaintext association. It skips only when TLS is disabled;
+missing TLS tools or certificates under the overlay fail the test.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build --wait
 docker compose -f docker-compose.yml -f docker-compose.tls.yml \
     exec test-client /tests/test-tls.sh
 ```
 
-`gen-certs.sh` produces the certificates automatically; the DCMTK TLS tool
-invocations then look like the following (`echoscu` on this image accepts
-these options, but the primary PACS answers over TLS only when the overlay
-runs on DCMTK 3.6.9 or later):
+When `TLS_ENABLED=true`, the entrypoint checks `dcmqrscp --help` for
+`--enable-tls` and refuses to start if TLS support is missing. It never
+falls back to plaintext. The healthcheck uses the configured `DICOM_PORT`
+and the client certificate; CI also runs the overlay on port 12012.
 
 ```bash
-# TLS-enabled C-ECHO with the generated client certificate
+# Inside test-client under the overlay:
 echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem \
     +cf /dicom/certs/ca-cert.pem \
-    -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112
+    -aet TEST_SCU -aec DCMTK_PACS pacs-server "$PACS_PORT"
 ```
 
-To serve TLS from the primary PACS, build the image with DCMTK 3.6.9 or
-later (for example Debian trixie's `dcmtk` package, or a source build with
-OpenSSL), or put a TLS-terminating proxy in front of `dcmqrscp`. With DCMTK
-3.6.9, C-MOVE sub-associations stay cleartext; DCMTK 3.7.0 adds TLS for them.
+Use the default cleartext stack for the general suite (`./pacs.sh test all`);
+its individual SCU commands do not automatically acquire TLS flags from the
+overlay. To switch back, recreate services with only `docker-compose.yml`.
 
 ### Adding Additional PACS Nodes
 

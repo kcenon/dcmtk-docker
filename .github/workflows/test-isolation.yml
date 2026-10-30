@@ -752,10 +752,7 @@ jobs:
         if: needs.changes.outputs.runtime == 'true'
         # test-tls.sh checks TLS_ENABLED before touching any SCP, so the default
         # (cleartext) stack must make it skip with exit 0. Proving the skip path
-        # still works guards against a silent regression in its guards. There is
-        # intentionally no TLS-serving job: DCMTK 3.6.7's dcmqrscp has no TLS
-        # options (DCMTK added them in 3.6.9), so the PACS cannot serve TLS on
-        # this base image.
+        # still works guards against a regression in the optional overlay.
         run: |
           out=$(docker compose exec -T test-client /tests/test-tls.sh)
           echo "$out"
@@ -764,51 +761,26 @@ jobs:
 
       - name: Confirm the DCMTK facts behind the TLS and codec docs
         if: needs.changes.outputs.runtime == 'true'
-        # README.md, docs/05, docs/08, docs/10, and docker-compose.tls.yml say
-        # that this image's dcmqrscp has no TLS options while storescp and
-        # echoscu have them, and that the dcmtk package ships the JPEG,
-        # JPEG-LS, and RLE codec tools (#104). Fail when a base-image or dcmtk
-        # pin change makes one of these statements false.
+        # Fail if a package update changes the documented TLS/codec capabilities.
         run: |
           probe() { docker compose exec -T test-client sh -c "$1"; }
           probe 'storescp --version'
           qr=$(probe 'dcmqrscp --help 2>&1 | grep -c -- --enable-tls || true')
           st=$(probe 'storescp --help 2>&1 | grep -c -- --enable-tls || true')
           ec=$(probe 'echoscu --help 2>&1 | grep -c -- --enable-tls || true')
+          mv=$(probe 'movescu --help 2>&1 | grep -c -- --enable-tls || true')
+          wl=$(probe 'wlmscpfs --help 2>&1 | grep -c -- --enable-tls || true')
           codecs=$(probe 'dpkg -L dcmtk | grep -cE "/usr/bin/dcm[cd](jpeg|jpls|rle)$" || true')
-          echo "dcmqrscp --enable-tls lines: $qr (expected 0)"
+          echo "dcmqrscp --enable-tls lines: $qr (expected 1 or more)"
           echo "storescp --enable-tls lines: $st (expected 1 or more)"
           echo "echoscu --enable-tls lines: $ec (expected 1 or more)"
           echo "dcmtk codec tools: $codecs (expected 6)"
-          if [ "$qr" -eq 0 ] && [ "$st" -ge 1 ] && [ "$ec" -ge 1 ] && [ "$codecs" -eq 6 ]; then
+          if [ "$qr" -ge 1 ] && [ "$st" -ge 1 ] && [ "$ec" -ge 1 ] && [ "$mv" -eq 0 ] && [ "$wl" -eq 0 ] && [ "$codecs" -eq 6 ]; then
             echo "OK: the documented DCMTK facts hold"
           else
             echo "ERROR: a documented DCMTK fact changed; update the TLS and codec statements (#104)"
             exit 1
           fi
-
-      - name: Assert the TLS overlay refuses to start on this image
-        if: needs.changes.outputs.runtime == 'true'
-        # With TLS_ENABLED=true the entrypoint must exit 1 with its explicit
-        # error instead of serving cleartext, because this image's dcmqrscp
-        # has no TLS options (#59, #104). GENERATE_TEST_DATA=false skips the
-        # data generation and indexing that run before the TLS check.
-        run: |
-          set +e
-          out=$(docker compose -f docker-compose.yml -f docker-compose.tls.yml \
-            run --rm --no-deps -T -e GENERATE_TEST_DATA=false pacs-server 2>&1)
-          rc=$?
-          set -e
-          echo "$out"
-          if [ "$rc" -ne 1 ]; then
-            echo "ERROR: expected exit 1 from the TLS overlay, got $rc"
-            exit 1
-          fi
-          if ! grep -q "has no TLS options" <<<"$out"; then
-            echo "ERROR: expected the entrypoint's TLS error message"
-            exit 1
-          fi
-          echo "OK: the TLS overlay refuses to start on this image"
 
       - name: Dump logs on failure
         if: needs.changes.outputs.runtime == 'true' && (failure())
@@ -908,10 +880,47 @@ jobs:
         if: needs.changes.outputs.runtime == 'true' && (always())
         run: docker compose -f docker-compose.yml -f docker-compose.restricted.yml down -v
 
-  # NOTE: the test-tls-skip job above exercises tests/test-tls.sh's skip path on
-  # the base image, confirms the DCMTK facts that the TLS and codec docs state,
-  # and checks that the TLS overlay refuses to start. There is intentionally no
-  # TLS-SERVING job: Debian bookworm's dcmtk 3.6.7 is built with OpenSSL, but
-  # its dcmqrscp has no TLS options (DCMTK added them in 3.6.9), so dcmqrscp
-  # rejects +tls. The TLS profile (docker-compose.tls.yml) and tests/test-tls.sh
-  # need a dcmqrscp with TLS options, that is, DCMTK 3.6.9 or later.
+  test-tls-serving:
+    name: TLS overlay accepts secure DICOM and rejects plaintext
+    needs: changes
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      DICOM_PORT: '12012'
+      GENERATE_PIXEL_DATA: 'true'
+    steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this context completes without Docker.'
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.runtime == 'true'
+      - name: Start TLS overlay on a non-default port
+        if: needs.changes.outputs.runtime == 'true'
+        run: |
+          cp env.default .env
+          docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build --wait --wait-timeout 120
+      - name: Verify secure C-ECHO and plaintext rejection
+        if: needs.changes.outputs.runtime == 'true'
+        run: docker compose -f docker-compose.yml -f docker-compose.tls.yml exec -T test-client /tests/test-tls.sh
+      - name: Collect TLS evidence
+        if: needs.changes.outputs.runtime == 'true' && always()
+        run: |
+          docker compose logs --no-color > tls-server.log
+          docker compose exec -T test-client sh -c "find /tmp -maxdepth 1 -type d -name 'tls-overlay-*' -print0 | tar --null -T - -czf -" > tls-probes.tgz
+      - uses: actions/upload-artifact@v4
+        if: needs.changes.outputs.runtime == 'true' && always()
+        with:
+          name: tls-overlay-evidence
+          path: |
+            tls-server.log
+            tls-probes.tgz
+      - name: Tear down stack
+        if: needs.changes.outputs.runtime == 'true' && always()
+        run: docker compose -f docker-compose.yml -f docker-compose.tls.yml down -v

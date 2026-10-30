@@ -71,8 +71,9 @@ Host Machine
 | mwl-server | `DCMTK_WLM` | 11115 | Modality Worklist SCP (`findscu -W`) | `wlmscpfs` |
 | test-client | `TEST_SCU` | — | Interactive SCU tool container | `sleep infinity` |
 
-All five services build from the same [`Dockerfile`](Dockerfile): `debian:bookworm-slim`
-with DCMTK 3.6.7 from the Debian `dcmtk` package, both pinned there. The PACS
+All five services build from the same [`Dockerfile`](Dockerfile): `debian:trixie-slim`
+with DCMTK 3.6.9 from Debian. The base digest is pinned; Debian security
+revisions of 3.6.9 are accepted (see [build policy](docs/09_configuration.md#image-and-package-version-policy)). The PACS
 executable is rebuilt from the matching Debian source with an
 [atomic storage filename reservation patch](patches/atomic-store-filenames.patch)
 for concurrent C-STORE; SCU and codec tools remain the packaged binaries.
@@ -99,7 +100,7 @@ data — not a drop-in replacement for a full clinical archive.
 | Modality Worklist (MWL) | ✅ | Served by `wlmscpfs` (`mwl-server`); query with `findscu -W` |
 | MPPS | ❌ | DCMTK ships no MPPS SCP — use Orthanc / dcm4chee |
 | Storage Commitment | ❌ | DCMTK ships no Storage-Commitment SCP — use dcm4chee |
-| TLS / secure transport | ⚠️ | The Debian package is built with OpenSSL, and `storescp`, `storescu`, `echoscu`, and `findscu` accept `+tls`. `dcmqrscp` has TLS options only from DCMTK 3.6.9, so on this image (3.6.7) the TLS overlay (`docker-compose.tls.yml`) stops at startup |
+| TLS / secure transport | ✅ | The TLS overlay serves incoming associations using DCMTK 3.6.9 with OpenSSL; CI checks secure C-ECHO and plaintext rejection. Outgoing C-MOVE stays cleartext; `movescu` and `wlmscpfs` have no TLS options |
 
 For DICOMweb, MPPS / Storage-Commitment workflows, or compressed pixel data,
 reach for [Orthanc](https://www.orthanc-server.com/) or

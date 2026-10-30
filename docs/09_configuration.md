@@ -71,3 +71,23 @@ Key sections:
 - **HostTable**: Defines known peers for C-MOVE destination routing
 - **AETable**: Defines storage areas, access mode, and capacity limits
 - **Global**: Network port, PDU size, max associations
+
+## Image and package version policy
+
+The Dockerfile pins the multi-architecture `debian:trixie-slim` manifest
+by digest. The default `DCMTK_PACKAGE_VERSION=3.6.9-*` accepts the newest
+available Debian revision of DCMTK 3.6.9, including security updates, without
+silently switching to a new upstream release. This avoids builds breaking
+when Debian removes a superseded exact revision (#103).
+
+The PACS patch is built from the authenticated Debian source package whose
+version exactly matches the installed `dcmtk` and `libdcmtk-dev` packages.
+The selected version is recorded in `/usr/share/doc/dcmtk/package-version.txt`.
+CI verifies TLS and codec capabilities and reruns the runtime suites.
+Refresh the base digest deliberately and review these checks on each update.
+
+For a specific still-published Debian revision, build with
+`docker build --build-arg DCMTK_PACKAGE_VERSION=3.6.9-5+deb13u3 .`.
+The default policy is not byte-for-byte reproducible: apt security revisions
+and dependencies can change. Retain the built image by digest for deployment
+reproducibility; an exact apt version alone cannot guarantee later rebuilds.

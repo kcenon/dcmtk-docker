@@ -108,13 +108,13 @@ start_pacs_server() {
         fi
     fi
 
-    # TLS profile: serve over an authenticated secure connection. This needs a
-    # dcmqrscp with TLS options (+tls): DCMTK added them in 3.6.9, and they exist
-    # only in builds with OpenSSL. Debian bookworm's dcmtk 3.6.7 is built with
-    # OpenSSL, but its dcmqrscp predates TLS, so we probe --help at runtime and
-    # refuse to start (exit 1) rather than silently downgrading to cleartext.
+    # TLS requires a dcmqrscp built with OpenSSL (DCMTK 3.6.9 or later).
+    # Capture all help output before matching so pipefail cannot mistake a
+    # writer's SIGPIPE for missing TLS support.
     if [ "${TLS_ENABLED:-false}" = "true" ]; then
-        if dcmqrscp --help 2>&1 | grep -q -- '--enable-tls'; then
+        local qr_help
+        qr_help=$(dcmqrscp --help 2>&1 || true)
+        if [[ "$qr_help" == *--enable-tls* ]]; then
             local cert_dir="${TLS_CERT_DIR:-/dicom/certs}"
             if [ -x /usr/local/bin/gen-certs.sh ]; then
                 /usr/local/bin/gen-certs.sh "${cert_dir}"
@@ -126,8 +126,7 @@ start_pacs_server() {
                 -c /tmp/dcmqrscp.cfg "${DICOM_PORT}"
         else
             log_error "TLS_ENABLED=true, but this dcmqrscp has no TLS options (--help lists no --enable-tls)."
-            log_error "dcmqrscp gained TLS in DCMTK 3.6.9. Debian bookworm's dcmtk 3.6.7 is built with OpenSSL,"
-            log_error "but its dcmqrscp predates TLS. Use DCMTK 3.6.9 or later, or unset TLS_ENABLED for cleartext."
+            log_error "Use DCMTK 3.6.9 or later built with OpenSSL, or unset TLS_ENABLED for cleartext."
             log_error "Refusing to start: a PACS asked to serve TLS must not silently fall back to plaintext."
             exit 1
         fi
