@@ -262,3 +262,23 @@ re-indexes them.
 > to the storage area, delete the marker (or wipe the storage volume) to
 > force a re-index. See [docs/06_dcmqridx_behavior.md](06_dcmqridx_behavior.md)
 > for details on the underlying `dcmqridx` semantics.
+
+## Independent TLS runtime check
+
+`tests/test-tls-runtime.sh` runs a temporary `storescp +tls` on container-local
+port 21114 (`TLS_RUNTIME_PORT` can override it). It creates private test
+certificates with `gen-certs.sh`, verifies authenticated C-ECHO, verifies
+C-STORE with exact SOP UID/metadata/full PixelData comparison, rejects
+plaintext, and confirms that TLS remains usable after that rejection.
+Commands are bounded by timeouts; the listener is always stopped and
+`/tmp/tls-runtime-*` evidence is retained. An occupied port fails safely.
+
+```bash
+docker compose run --rm --no-deps -e ROLE=custom \
+    -e GENERATE_TEST_DATA=false test-client /tests/test-tls-runtime.sh
+```
+
+The independent CI job builds only the test client and starts no PACS
+services. No Compose profile or published TLS receiver port is added: this
+listener exists only for the test and does not need an external endpoint.
+The PACS overlay has its own TLS check (`tests/test-tls.sh`).
