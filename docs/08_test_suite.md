@@ -16,7 +16,7 @@ Part of the dcmtk-docker documentation; start from the [README](../README.md).
 ./pacs.sh test find     # Query
 ./pacs.sh test move     # Retrieval
 ./pacs.sh test pixeldata  # PixelData smoke (opt-in, see below)
-./pacs.sh test transfer-syntax  # Uncompressed transfer-syntax matrix
+./pacs.sh test transfer-syntax  # Default and opt-in lossless transfer-syntax matrix
 ./pacs.sh test load-smoke # Operational load smoke (parallel C-STORE + C-FIND)
 ```
 
@@ -34,23 +34,60 @@ then verifies `storescu` can negotiate each one against the primary PACS:
 | implicit-vr-le   | 1.2.840.10008.1.2      | `+ti`          |
 | explicit-vr-be   | 1.2.840.10008.1.2.2    | `+tb`          |
 
-The suite covers no compressed syntax (JPEG / JPEG-LS / RLE / JPEG2000),
-because the primary PACS accepts none: the entrypoint starts `dcmqrscp`
-with its default preference (`+x=`), which offers only the three syntaxes
-above. The image already has DCMTK's JPEG, JPEG-LS, and RLE codec tools
-(`dcmcjpeg`, `dcmcjpls`, `dcmcrle`, and the matching `dcmdjpeg`,
-`dcmdjpls`, and `dcmdrle` decoders); it has no JPEG 2000 codec. To extend
-coverage:
+Set `DICOM_TRANSFER_SYNTAX` to opt into one lossless compressed syntax in
+addition to the defaults. The same preset reaches both PACS nodes and the
+C-MOVE receiver. `DICOM_MOVE_TRANSFER_SYNTAX` separately selects PACS
+outgoing proposals and defaults to `uncompressed`.
 
-1. Pass `dcmqrscp` a preference option for the target syntax (the
-   entrypoint passes none today), such as `+xs` (JPEG Lossless), `+xt`
-   (JPEG-LS Lossless), or `+xr` (RLE Lossless). Each option adds one
-   compressed syntax to the three above; an association negotiation
-   profile (`-xf`) can list several.
-2. Create the test object with `dcmcjpeg`, `dcmcjpls`, or `dcmcrle`.
-   `dcmconv` writes only uncompressed and deflated syntaxes.
-3. Add the target UID and the matching `storescu` proposal option (`-xs`,
-   `-xt`, or `-xr`) to the matrix in `tests/test-transfer-syntax.sh`.
+| Preset | Transfer Syntax UID | Encoder / decoder | Incoming / outgoing flags |
+|--------|---------------------|-------------------|---------------------------|
+| `jpeg-lossless` | 1.2.840.10008.1.2.4.70 | `dcmcjpeg +e1` / `dcmdjpeg` | `+xs` / `-xs` |
+| `jpeg-ls-lossless` | 1.2.840.10008.1.2.4.80 | `dcmcjpls +el` / `dcmdjpls` | `+xt` / `-xt` |
+| `rle-lossless` | 1.2.840.10008.1.2.5 | `dcmcrle` / `dcmdrle` | `+xr` / `-xr` |
+
+Persist the setting in `.env`, then recreate the services:
+
+```bash
+# In .env:
+# DICOM_TRANSFER_SYNTAX=jpeg-lossless
+# GENERATE_PIXEL_DATA=true
+docker compose up -d --build --wait
+./pacs.sh test transfer-syntax
+```
+
+The suite uses the corresponding codec (not `dcmconv`), requires PixelData,
+checks the encoded TransferSyntaxUID, and proves the actual accepted C-STORE
+syntax using one combined presentation context. The stored object must have
+the selected syntax and its decoded SOP UID, selected metadata, and full
+PixelData must match the original. With a matching outgoing preference, an
+IMAGE-level C-MOVE must also deliver exactly one object in that syntax. The
+original uncompressed instance is restored, including on failure, so later
+suites retain their fixture catalog. `/tmp/transfer-syntax-*` retains evidence.
+CI runs the complete suite once per incoming preset, including uncompressed
+retrieval, then recreates the PACS with the matching outgoing preference and
+runs the compressed C-MOVE check:
+
+```bash
+DICOM_TRANSFER_SYNTAX=jpeg-lossless DICOM_MOVE_TRANSFER_SYNTAX=jpeg-lossless \
+    docker compose up -d --wait
+./pacs.sh test transfer-syntax
+```
+
+DCMTK 3.6.9's `dcmqrscp` does not transcode compressed PixelData. Its C-MOVE
+proposal uses one transfer-syntax list per SOP class, so a compressed outgoing
+preference can make an uncompressed object fail delivery. Select an outgoing
+preference matching the stored encoding for a homogeneous retrieval; mixed
+compressed/uncompressed studies requiring transcoding are not supported by
+these presets. Keep the default outgoing setting for the general suite.
+The default outgoing setting cannot retrieve compressed objects to an
+uncompressed-only receiver. A profile alone cannot add the missing codec
+conversion to the PACS daemon.
+
+The default `uncompressed` passes no extra flags. Each compressed preset
+accepts one compressed syntax plus the three uncompressed ones; accepting
+several compressed syntaxes at once would require an association negotiation
+profile and is outside these presets. Unknown values fail startup. The image
+has no JPEG 2000 codec and this suite makes no JPEG 2000 support claim.
 
 ## Load Smoke Testing
 
