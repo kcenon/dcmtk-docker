@@ -8,7 +8,7 @@
 # update the digest below and the dcmtk= pin in the apt-get install step.
 
 # debian:bookworm-slim pinned by digest (multi-arch manifest list).
-FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716
+FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS base
 
 LABEL maintainer="dcmtk-pacs-docker"
 LABEL description="DCMTK-based PACS test environment with all DICOM tools"
@@ -23,6 +23,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     openssl \
     && rm -rf /var/lib/apt/lists/*
+
+# Rebuild only the PACS executable from the matching authenticated Debian
+# source package. The other SCU/codec tools remain the distribution binaries.
+# An atomic filename reservation patch fixes concurrent C-STORE (#115).
+FROM base AS pacs-source
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       build-essential cmake patch libssl-dev zlib1g-dev libwrap0-dev \
+       "libdcmtk-dev=$(dpkg-query -W -f='${Version}' dcmtk)" \
+    && mkdir /src && cd /src \
+    && apt-get source "dcmtk=$(dpkg-query -W -f='${Version}' dcmtk)"
+FROM pacs-source AS pacs-build
+COPY patches/ /patches/
+RUN bash /patches/build-pacs.sh
+
+FROM base
+COPY --from=pacs-build /build/bin/dcmqrscp /usr/local/bin/dcmqrscp
+COPY --from=pacs-build /src/dcmtk-*/COPYRIGHT /usr/share/doc/dcmtk/COPYRIGHT.patched-pacs
+COPY patches/atomic-store-filenames.patch /usr/share/doc/dcmtk/
 
 # Create a dedicated non-root user to run the DICOM services. The DICOM port
 # (11112) is >1024, so no privileged binding is required. Storage paths are

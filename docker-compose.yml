@@ -208,6 +208,9 @@ services:
       # (count + DICOM UID match) instead of relying on movescu exit
       # codes alone. See issue #33.
       - received-data:/dicom/received
+      # Read-only inventories for concurrent storage integrity regressions.
+      - pacs-data:/dicom/primary-db:ro
+      - pacs2-data:/dicom/secondary-db:ro
     networks:
       - dicom-net
     depends_on:

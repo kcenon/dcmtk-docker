@@ -96,6 +96,34 @@ path; copy it before destroying the container. `scripts/test-load-verdict.sh`
 exercises missing-file, failed-store, and failed-query negative cases on an
 isolated stack, restoring injected faults afterward.
 
+### Concurrent storage and recovery
+
+Run `./pacs.sh test concurrent-store` on a fresh, isolated stack. It uses four
+writers per PACS, ten associations per writer, and concurrent queries. Both
+PACS must preserve the exact query, on-disk, and retrieved UID sets and full
+metadata/PixelData hashes. The first phase repeats the fixture UIDs; the
+second adds four disjoint sets, preserving the original fixtures as well.
+The test-client mounts both PACS storage volumes read-only for inventories.
+
+The host runner `bash scripts/test-storage-recovery.sh` also performs
+bidirectional PACS-to-PACS C-MOVE, three restarts, container recreation with
+volumes retained, and an idle secondary SIGKILL. It verifies the complete
+instance set after each event. It leaves the reported test-client workspace
+available for inspection. Use a fresh project for another full run because
+the disjoint instances intentionally remain stored. This dedicated CI suite
+runs separately from `test all`, which retains the shorter functional and
+load-smoke sequence. CI enables generated PixelData for the recovery job.
+
+The image rebuilds `dcmqrscp` from the matching Debian source package and
+applies `patches/atomic-store-filenames.patch`. Upstream filename generation
+checks existence before the later dataset save; concurrent association
+processes can choose the same absent path. Exclusive atomic creation reserves
+each path before it is returned. A build-time multiprocess regression must
+fail against the distribution library and pass against the patched library.
+The runtime PACS uses its source version's built-in DICOM dictionary; other
+tools retain Debian's dictionary configuration. The patch and source copyright
+notice are included under `/usr/share/doc/dcmtk/` in the image.
+
 ## Test Data
 
 Synthetic DICOM files are generated automatically at first startup:

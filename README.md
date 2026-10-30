@@ -72,7 +72,10 @@ Host Machine
 | test-client | `TEST_SCU` | — | Interactive SCU tool container | `sleep infinity` |
 
 All five services build from the same [`Dockerfile`](Dockerfile): `debian:bookworm-slim`
-with DCMTK 3.6.7 from the Debian `dcmtk` package, both pinned there.
+with DCMTK 3.6.7 from the Debian `dcmtk` package, both pinned there. The PACS
+executable is rebuilt from the matching Debian source with an
+[atomic storage filename reservation patch](patches/atomic-store-filenames.patch)
+for concurrent C-STORE; SCU and codec tools remain the packaged binaries.
 The `ROLE` environment variable selects which service to run.
 
 ## Capabilities
@@ -111,7 +114,7 @@ A unified CLI script wraps all common operations:
 | `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`, `adhoc-peers`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `concurrent-store`, `worklist`, `adhoc-peers`) |
 | `./pacs.sh add-peer <name> <ae> <host> <port>` | Register an ad-hoc C-MOVE destination and restart the PACS |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
