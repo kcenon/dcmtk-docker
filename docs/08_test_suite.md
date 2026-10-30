@@ -16,6 +16,7 @@ Part of the dcmtk-docker documentation; start from the [README](../README.md).
 ./pacs.sh test find     # Query
 ./pacs.sh test move     # Retrieval
 ./pacs.sh test pixeldata  # PixelData smoke (opt-in, see below)
+./pacs.sh test get       # C-GET study retrieval and exact content checks
 ./pacs.sh test transfer-syntax  # Default and opt-in lossless transfer-syntax matrix
 ./pacs.sh test load-smoke # Operational load smoke (parallel C-STORE + C-FIND)
 ```
@@ -319,3 +320,18 @@ The independent CI job builds only the test client and starts no PACS
 services. No Compose profile or published TLS receiver port is added: this
 listener exists only for the test and does not need an external endpoint.
 The PACS overlay has its own TLS check (`tests/test-tls.sh`).
+
+## C-GET retrieval
+
+`./pacs.sh test get` runs `tests/test-get.sh`. It retrieves each CT, MR, and CR
+study with `getscu` into a new directory, requires final DIMSE Success, checks
+the exact instance count from `fixture-manifest.sh`, and compares every SOP
+UID, selected metadata field, and full PixelData against the source fixtures.
+Evidence remains under `/tmp/c-get-*`. Repeated runs use separate directories,
+so prior files cannot satisfy a failed retrieval.
+
+C-GET carries the storage sub-operations over the requesting association; it
+needs no C-MOVE destination entry or separate receiver listener. The suite is
+part of `test-all.sh` and the isolation CI matrix, and seeds an empty PACS
+when run alone. Metadata-only fixtures are supported; enabling
+`GENERATE_PIXEL_DATA=true` also verifies complete image payloads.
