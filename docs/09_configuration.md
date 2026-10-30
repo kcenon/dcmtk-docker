@@ -4,8 +4,9 @@ Part of the dcmtk-docker documentation; start from the [README](../README.md).
 
 ## Environment Variables
 
-The project uses `env.default` as the default configuration. To customize, copy
-to `.env` and edit (`.env` takes precedence when both exist):
+Copy the `env.default` template to `.env` and edit it. Compose interpolates
+shell variables first, then `.env`, then the defaults in `docker-compose.yml`.
+It does not read `env.default` directly:
 
 ```bash
 cp env.default .env
@@ -25,6 +26,8 @@ cp env.default .env
 | `TEST_SCU_AE_TITLE` | `TEST_SCU` | Test client AE Title |
 | `PACS_BIND_ADDR` | `0.0.0.0` | Host interface the published ports bind to. Set to e.g. `127.0.0.1` to expose ports only to the local host (see Security Notes) |
 | `DICOM_PORT` | `11112` | Shared internal DICOM port for both PACS, receiver, worklist, healthchecks, and test-client peers |
+| `DICOM_TRANSFER_SYNTAX` | `uncompressed` | Incoming PACS/receiver preset: `uncompressed`, `jpeg-lossless`, `jpeg-ls-lossless`, or `rle-lossless` |
+| `DICOM_MOVE_TRANSFER_SYNTAX` | `uncompressed` | Separate outgoing C-MOVE preset; see [mixed-data limits](#lossless-transfer-syntax-presets) |
 | `MAX_PDU_SIZE` | `16384` | Maximum PDU size (bytes) |
 | `MAX_ASSOCIATIONS` | `16` | Maximum concurrent associations |
 | `MAX_STUDIES` | `200` | Maximum studies per storage area |

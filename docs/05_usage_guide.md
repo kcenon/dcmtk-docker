@@ -70,7 +70,8 @@ The `up` command automatically:
 # pacs-server          healthy      DCMTK_PACS     11112
 # pacs-server-2        healthy      DCMTK_PAC2     11113
 # storescp-receiver    healthy      STORE_SCP      11114
-# test-client          running      TEST_SCU       -
+# mwl-server           healthy      DCMTK_WLM      11115
+# test-client          healthy      TEST_SCU       -
 
 # Run the full test suite
 ./pacs.sh test
@@ -79,13 +80,17 @@ The `up` command automatically:
 ### What Happens on Startup
 
 1. Docker builds a single image from `Dockerfile` (debian:trixie-slim + DCMTK 3.6.9)
-2. Four containers start, each with a different `ROLE`:
+2. Five containers start using the service roles:
    - `pacs-server`: processes `dcmqrscp-primary.cfg.template` → starts `dcmqrscp`
    - `pacs-server-2`: processes `dcmqrscp-secondary.cfg.template` → starts `dcmqrscp`
    - `storescp-receiver`: starts `storescp` with output directory
-   - `test-client`: generates test data → runs `sleep infinity`
-3. Health checks run C-ECHO every 10 seconds to verify PACS readiness
-4. `test-client` waits for `pacs-server` to be healthy before starting
+   - `mwl-server`: generates worklist items → starts `wlmscpfs`
+   - `test-client`: generates test data → reports ready → runs `sleep infinity`
+3. Network service health checks run C-ECHO to verify DICOM readiness
+4. `test-client` waits for both PACS servers, the receiver, and the worklist server
+   to be healthy before starting. Its own health check succeeds only after test
+   data generation finishes, so `docker compose up --wait` waits for complete
+   fixtures as well as ready DICOM services.
 
 ---
 
@@ -403,30 +408,12 @@ docker compose restart test-client
 
 ## 6. Configuration Reference
 
-### Environment Variables (Complete List)
+### Environment Variables
 
-| Variable | Default | Used By | Description |
-|----------|---------|---------|-------------|
-| **Service Identity** | | | |
-| `PACS1_AE_TITLE` | `DCMTK_PACS` | pacs-server | Primary PACS Application Entity Title |
-| `PACS2_AE_TITLE` | `DCMTK_PAC2` | pacs-server-2 | Secondary PACS AE Title |
-| `STORESCP_AE_TITLE` | `STORE_SCP` | storescp-receiver | Store SCP receiver AE Title |
-| `TEST_SCU_AE_TITLE` | `TEST_SCU` | test-client | Test client AE Title |
-| **Port Mapping** | | | |
-| `PACS1_HOST_PORT` | `11112` | pacs-server | Host port for primary PACS |
-| `PACS2_HOST_PORT` | `11113` | pacs-server-2 | Host port for secondary PACS |
-| `STORESCP_HOST_PORT` | `11114` | storescp-receiver | Host port for store receiver |
-| `DICOM_PORT` | `11112` | all | Internal container DICOM port |
-| **PACS Tuning** | | | |
-| `MAX_PDU_SIZE` | `16384` | PACS servers | Max Protocol Data Unit (4096-131072) |
-| `MAX_ASSOCIATIONS` | `16` | PACS servers | Max concurrent DICOM associations |
-| `MAX_STUDIES` | `200` | PACS servers | Max studies in storage area |
-| `MAX_BYTES_PER_STUDY` | `1024mb` | PACS servers | Max storage per study |
-| **Logging** | | | |
-| `LOG_LEVEL` | `info` | all | DCMTK log level: debug, info, warn, error |
-| **Test Data** | | | |
-| `GENERATE_TEST_DATA` | `true` | pacs-server, test-client | Auto-generate synthetic DICOM files |
-| `OID_ROOT` | `1.2.826.0.1.3680043.8.499` | generate-test-data.sh | OID root for test UIDs |
+Use the [authoritative environment variable table](09_configuration.md#environment-variables)
+for defaults, worklist settings, host bind addresses, resource limits, ad-hoc
+peers, transfer syntax presets, and PixelData configuration. Copy `env.default`
+to `.env` to customize them; Compose reads `.env` and shell overrides.
 
 ### dcmqrscp Configuration Template Syntax
 
@@ -452,6 +439,7 @@ AETitle  StorageDirectory  AccessMode  (MaxStudies, MaxBytesPerStudy)  Peers
 | `pacs-data` | `/dicom/db` (pacs-server) | Primary PACS storage |
 | `pacs2-data` | `/dicom/db` (pacs-server-2) | Secondary PACS storage |
 | `received-data` | `/dicom/received` (storescp-receiver) | C-MOVE received files |
+| `worklist-data` | `/dicom/worklist` (mwl-server) | Generated worklist items |
 | `./config` (bind) | `/etc/dcmtk` (PACS servers) | Config templates (read-only) |
 | `./data` (bind) | `/dicom/testdata` (test-client) | Test DICOM files |
 | `./tests` (bind) | `/tests` (test-client) | Test scripts (read-only) |
@@ -579,6 +567,11 @@ port is exposed.
 
 ### Adding Additional PACS Nodes
 
+The defaults already use host ports 11112 (primary PACS), 11113 (secondary
+PACS), 11114 (store receiver), and 11115 (worklist). The example below uses
+11116 for a third PACS. It shares the configured internal `DICOM_PORT` and
+host bind address with the existing services.
+
 To add a third PACS node, extend `docker-compose.yml`:
 
 ```yaml
@@ -589,7 +582,7 @@ pacs-server-3:
   environment:
     - ROLE=pacs-server
     - AE_TITLE=DCMTK_PAC3
-    - DICOM_PORT=11112
+    - DICOM_PORT=${DICOM_PORT:-11112}
     - STORAGE_DIR=/dicom/db
     - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary.cfg.template
     # Add other PACS nodes to this node's HostTable
@@ -597,14 +590,14 @@ pacs-server-3:
     - STORESCP_AE_TITLE=STORE_SCP
     - TEST_SCU_AE_TITLE=TEST_SCU
   ports:
-    - "11115:11112"
+    - "${PACS_BIND_ADDR:-0.0.0.0}:11116:${DICOM_PORT:-11112}"
   volumes:
     - pacs3-data:/dicom/db
     - ./config:/etc/dcmtk:ro
   networks:
     - dicom-net
   healthcheck:
-    test: ["CMD", "echoscu", "localhost", "11112"]
+    test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost $$DICOM_PORT"]
     interval: 10s
     timeout: 5s
     retries: 3
