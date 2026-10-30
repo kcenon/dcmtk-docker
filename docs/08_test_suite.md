@@ -55,9 +55,9 @@ coverage:
 ## Load Smoke Testing
 
 The `load-smoke` suite drives the PACS with parallel `storescu` workers
-and a concurrent `findscu` probe, exercising the `MAX_ASSOCIATIONS`
-ceiling, association cleanup, and mixed store/query behaviour that the
-functional suites do not cover.
+and concurrent `findscu` queries. It tests normal load below the configured
+association limit; every store and query must succeed. Deliberate saturation
+is a separate diagnostic experiment, not a passing mode of this suite.
 
 ```bash
 # Defaults are conservative so the suite stays inside ~1-2 min of CI budget
@@ -78,10 +78,23 @@ LOAD_SMOKE_PARALLEL=4 LOAD_SMOKE_REPEAT=3 ./pacs.sh test load-smoke
 to the running test container, including when running `test all`. Unset
 variables retain the test script's defaults; no container recreation is needed.
 
-The suite passes when at least half of the parallel workers complete and
-the post-load study count is at or above the pre-load baseline. Failed
-worker logs are emitted to stderr so the offending association can be
-attributed back to its worker.
+The suite snapshots the CT/MR/CR source fixtures and checks their exact SOP
+Instance UID set against IMAGE-level queries and retrieval into an empty
+`storescp-receiver`, before and after load. Retrieved metadata and full
+PixelData hashes must match. A missing instance already present at startup
+fails before workers run; only an empty fixture catalog is seeded.
+
+Malformed settings fail instead of silently selecting a different workload.
+Raising concurrency above `MAX_ASSOCIATIONS` may legitimately reject an
+association, but the resulting run still fails this normal-load test. Storage
+errors must never be accepted as association-limit backpressure.
+
+Run suites in separate Compose projects: this check clears the synthetic
+receiver volume between retrievals. On failure it prints diagnostic tails
+and retains the workspace in `test-client` at the reported `/tmp/load-smoke-*`
+path; copy it before destroying the container. `scripts/test-load-verdict.sh`
+exercises missing-file, failed-store, and failed-query negative cases on an
+isolated stack, restoring injected faults afterward.
 
 ## Test Data
 

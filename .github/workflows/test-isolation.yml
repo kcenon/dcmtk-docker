@@ -392,6 +392,9 @@ jobs:
           done
           exit 1
 
+      - name: Verify load smoke rejects injected faults
+        run: bash scripts/test-load-verdict.sh
+
       - name: Wipe PACS storage so the aggregator's C-STORE suite starts empty
         # test-all.sh runs test-store.sh, which requires an empty PACS
         # (ensure_clean_pacs) so its >= 3 study-count check is meaningful. The
@@ -427,6 +430,19 @@ jobs:
         run: |
           docker compose logs pacs-server || true
           docker compose logs test-client || true
+
+      - name: Collect load integrity diagnostics
+        if: failure()
+        run: |
+          docker compose exec -T test-client sh -c \
+            "find /tmp -maxdepth 1 -type d -name 'load-smoke-*' -print0 | tar --null -T - -czf -" \
+            > load-integrity-diagnostics.tgz
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: load-integrity-diagnostics
+          path: load-integrity-diagnostics.tgz
 
       - name: Tear down stack
         if: always()
