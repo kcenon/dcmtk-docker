@@ -155,3 +155,8 @@ docker compose up -d
 `./pacs.sh up` continues to launch the default `test` mode unchanged;
 restricted mode is purely an opt-in compose override (see
 `docker-compose.restricted.yml`).
+
+The [independent TLS test](08_test_suite.md#independent-tls-runtime-check)
+validates the image's certificate generator and OpenSSL/DCMTK transport
+without the PACS overlay. Its temporary `storescp` has no published port and
+is stopped on exit; it is a test endpoint, not a TLS deployment profile.

@@ -924,3 +924,45 @@ jobs:
       - name: Tear down stack
         if: needs.changes.outputs.runtime == 'true' && always()
         run: docker compose -f docker-compose.yml -f docker-compose.tls.yml down -v
+
+  test-tls-runtime:
+    name: independent storescp TLS runtime
+    needs: changes
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this context completes without Docker.'
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.runtime == 'true'
+      - name: Build test client
+        if: needs.changes.outputs.runtime == 'true'
+        run: docker compose build test-client
+      - name: Verify TLS without any PACS services
+        if: needs.changes.outputs.runtime == 'true'
+        run: |
+          docker compose run --name tls-runtime-test --no-deps -T \
+            -e ROLE=custom -e GENERATE_TEST_DATA=false test-client /tests/test-tls-runtime.sh
+      - name: Collect runtime TLS evidence
+        if: needs.changes.outputs.runtime == 'true' && always()
+        run: |
+          docker logs tls-runtime-test > tls-runtime.log 2>&1
+          docker cp tls-runtime-test:/tmp tls-runtime-evidence
+      - uses: actions/upload-artifact@v4
+        if: needs.changes.outputs.runtime == 'true' && always()
+        with:
+          name: independent-tls-evidence
+          path: |
+            tls-runtime.log
+            tls-runtime-evidence/tls-runtime-*/
+      - name: Tear down test client
+        if: needs.changes.outputs.runtime == 'true' && always()
+        run: docker compose down -v --remove-orphans

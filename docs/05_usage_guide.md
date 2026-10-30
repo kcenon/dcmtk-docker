@@ -572,6 +572,11 @@ Use the default cleartext stack for the general suite (`./pacs.sh test all`);
 its individual SCU commands do not automatically acquire TLS flags from the
 overlay. To switch back, recreate services with only `docker-compose.yml`.
 
+For a TLS check without starting the PACS, run the
+[independent storescp test](08_test_suite.md#independent-tls-runtime-check).
+It uses an ephemeral container-local listener; no receiver profile or host
+port is exposed.
+
 ### Adding Additional PACS Nodes
 
 To add a third PACS node, extend `docker-compose.yml`:
