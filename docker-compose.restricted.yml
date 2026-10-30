@@ -21,7 +21,7 @@
 #      whitelist instead of the wildcard "ANY".
 #
 #   2. healthcheck (both PACS): the base healthcheck is a C-ECHO
-#      (echoscu -aec $AE_TITLE localhost 11112). With no -aet, the Calling AE
+#      (echoscu -aec $AE_TITLE localhost $DICOM_PORT). With no -aet, the Calling AE
 #      defaults to "ECHOSCU", and the caller resolves as "localhost". Under
 #      the restricted profile, dcmqrscp's "all_peers" whitelist enumerates
 #      (test_client, store_scp, pacs2) and access control matches BOTH the
@@ -31,7 +31,7 @@
 #      depends_on: service_healthy hangs forever.
 #
 #      To decouple readiness from AE access control, each PACS healthcheck is
-#      overridden here to a TCP liveness probe (nc -z localhost 11112;
+#      overridden here to a TCP liveness probe (nc -z localhost $DICOM_PORT;
 #      netcat-openbsd is installed in the image). AE-whitelist behavior is
 #      verified separately by tests/test-restricted-mode.sh, which is the
 #      proper place for that assertion.
@@ -64,7 +64,7 @@ services:
     environment:
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary-restricted.cfg.template
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 11112"]
+      test: ["CMD-SHELL", "nc -z localhost $$DICOM_PORT"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -75,7 +75,7 @@ services:
     environment:
       - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-secondary-restricted.cfg.template
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 11112"]
+      test: ["CMD-SHELL", "nc -z localhost $$DICOM_PORT"]
       interval: 10s
       timeout: 5s
       retries: 3

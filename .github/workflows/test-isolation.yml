@@ -37,6 +37,47 @@ jobs:
           python3 scripts/ci_runtime_changes.py --event "$EVENT_NAME" \
             --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
+  test-custom-port:
+    name: non-default internal DICOM port
+    needs: changes
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      DICOM_PORT: '12012'
+      GENERATE_PIXEL_DATA: 'true'
+    steps:
+      - name: Require a successful path decision
+        env:
+          DECISION_RESULT: ${{ needs.changes.result }}
+          RUNTIME_REQUIRED: ${{ needs.changes.outputs.runtime }}
+        run: |
+          test "$DECISION_RESULT" = success
+          case "$RUNTIME_REQUIRED" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only change
+        if: needs.changes.outputs.runtime != 'true'
+        run: echo 'No runtime changes; this context completes without Docker.'
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.runtime == 'true'
+      - name: Start on the configured port
+        if: needs.changes.outputs.runtime == 'true'
+        run: |
+          cp env.default .env
+          docker compose up -d --build --wait --wait-timeout 120
+      - name: Run real CLI suites on the configured port
+        if: needs.changes.outputs.runtime == 'true'
+        run: ./pacs.sh test all
+      - name: Verify restricted overlay on the configured port
+        if: needs.changes.outputs.runtime == 'true'
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.restricted.yml up -d --no-build --wait --wait-timeout 120
+          docker compose -f docker-compose.yml -f docker-compose.restricted.yml exec -T test-client /tests/test-restricted-mode.sh
+      - name: Dump logs on failure
+        if: needs.changes.outputs.runtime == 'true' && failure()
+        run: docker compose logs --no-color
+      - name: Tear down stack
+        if: needs.changes.outputs.runtime == 'true' && always()
+        run: docker compose -f docker-compose.yml -f docker-compose.restricted.yml down -v
+
   test-storage-integrity:
     name: concurrent storage and recovery integrity
     needs: changes
