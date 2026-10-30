@@ -587,6 +587,7 @@ ${C_BOLD}Services:${C_RESET}
   pacs-server        Primary PACS (C-ECHO/STORE/FIND/MOVE)
   pacs-server-2      Secondary PACS for multi-PACS tests
   storescp-receiver  Store SCP receiver for C-MOVE testing
+  mwl-server        Modality Worklist SCP (findscu -W)
   test-client        Interactive client with all DCMTK SCU tools
 EOF
 }
