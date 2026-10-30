@@ -1,6 +1,6 @@
 --- a/dcmqrdb/libsrc/dcmqrdbi.cc
 +++ b/dcmqrdb/libsrc/dcmqrdbi.cc
-@@ -3259,11 +3259,31 @@
+@@ -3259,9 +3259,29 @@
      // unsigned int seed = fnamecreator.hashString(SOPInstanceUID);
      unsigned int seed = (unsigned int)time(NULL);
      newImageFileName[0]=0; // return empty string in case of error
@@ -35,5 +35,3 @@
 +    }
 +    return QR_EC_IndexDatabaseError;
  }
- 
- 
