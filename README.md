@@ -91,7 +91,7 @@ uncompressed data by default and opt-in lossless compressed transfer syntaxes.
 | C-STORE (Storage) | ✅ | Indexed into a real queryable `index.dat` archive |
 | C-FIND (Query) | ✅ | Patient Root + Study Root; STUDY/SERIES levels tested |
 | C-MOVE (Retrieve) | ✅ | Cross-node; destination AE must be in the HostTable |
-| C-GET (Retrieve) | ✅ | `dcmqrscp` serves C-GET unless started with `--disable-get`, which the entrypoint does not pass; no test covers C-GET |
+| C-GET (Retrieve) | ✅ | `getscu` retrieves CT/MR/CR studies into fresh scratch directories; tests compare exact counts, SOP UIDs, metadata and full PixelData |
 | Uncompressed transfer syntaxes | ✅ | Implicit VR LE, Explicit VR LE, Explicit VR BE |
 | AE-title access control | ✅ | Opt-in restricted (whitelist) profile |
 | Non-root container | ✅ | Network-facing PACS/receiver services run as the unprivileged `pacs` user (the test-client helper runs as root for host-mounted writes) |

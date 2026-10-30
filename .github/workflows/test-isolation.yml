@@ -138,6 +138,7 @@ jobs:
           - test-store.sh
           - test-find.sh
           - test-move.sh
+          - test-get.sh
           - test-worklist.sh
           - test-adhoc-peers.sh
           - test-transfer-syntax.sh
