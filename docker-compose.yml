@@ -43,14 +43,14 @@ services:
       # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
       - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
-      - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS1_HOST_PORT:-11112}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS1_HOST_PORT:-11112}:${DICOM_PORT:-11112}"
     volumes:
       - pacs-data:/dicom/db
       - ./config:/etc/dcmtk:ro
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost 11112"]
+      test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost $$DICOM_PORT"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -86,14 +86,14 @@ services:
       # Ad-hoc C-MOVE destinations: "name=AE:host:port ..." (empty = none)
       - EXTRA_PEERS=${EXTRA_PEERS:-}
     ports:
-      - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS2_HOST_PORT:-11113}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS2_HOST_PORT:-11113}:${DICOM_PORT:-11112}"
     volumes:
       - pacs2-data:/dicom/db
       - ./config:/etc/dcmtk:ro
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost 11112"]
+      test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost $$DICOM_PORT"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -117,13 +117,13 @@ services:
       - STORAGE_DIR=/dicom/received
       - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
-      - "${PACS_BIND_ADDR:-0.0.0.0}:${STORESCP_HOST_PORT:-11114}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${STORESCP_HOST_PORT:-11114}:${DICOM_PORT:-11112}"
     volumes:
       - received-data:/dicom/received
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
+      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost $$DICOM_PORT"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -146,18 +146,18 @@ services:
       - AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
       - WLM_AE_TITLE=${WLM_AE_TITLE:-DCMTK_WLM}
       - WLM_STATION_AE=${WLM_STATION_AE:-MODALITY01}
-      - DICOM_PORT=11112
+      - DICOM_PORT=${DICOM_PORT:-11112}
       - WLM_DATA_DIR=/dicom/worklist
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - OID_ROOT=${OID_ROOT:-1.2.826.0.1.3680043.8.499}
     ports:
-      - "${PACS_BIND_ADDR:-0.0.0.0}:${WLM_HOST_PORT:-11115}:11112"
+      - "${PACS_BIND_ADDR:-0.0.0.0}:${WLM_HOST_PORT:-11115}:${DICOM_PORT:-11112}"
     volumes:
       - worklist-data:/dicom/worklist
     networks:
       - dicom-net
     healthcheck:
-      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
+      test: ["CMD-SHELL", "echoscu -aet HEALTHCHECK -aec $$AE_TITLE localhost $$DICOM_PORT"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -179,7 +179,11 @@ services:
       - ROLE=test-client
       - AE_TITLE=${TEST_SCU_AE_TITLE:-TEST_SCU}
       - PACS_HOST=pacs-server
-      - PACS_PORT=11112
+      - DICOM_PORT=${DICOM_PORT:-11112}
+      - PACS_PORT=${DICOM_PORT:-11112}
+      - PACS2_PORT=${DICOM_PORT:-11112}
+      - STORESCP_PORT=${DICOM_PORT:-11112}
+      - WLM_PORT=${DICOM_PORT:-11112}
       - PACS_AE_TITLE=${PACS1_AE_TITLE:-DCMTK_PACS}
       - PACS2_HOST=pacs-server-2
       - PACS2_AE_TITLE=${PACS2_AE_TITLE:-DCMTK_PAC2}

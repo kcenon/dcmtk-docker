@@ -67,7 +67,7 @@ RUN chmod +x /usr/local/bin/*.sh
 # received-data) inherit this ownership on first mount.
 RUN chown -R pacs:pacs /dicom /etc/dcmtk
 
-# Default DICOM port
+# Default DICOM port metadata; Compose publishes the configured DICOM_PORT.
 EXPOSE 11112
 
 # Default environment variables

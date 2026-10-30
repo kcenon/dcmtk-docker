@@ -24,7 +24,7 @@ cp env.default .env
 | `WLM_STATION_AE` | `MODALITY01` | Scheduled Station AE Title `(0040,0001)` written into the generated worklist items |
 | `TEST_SCU_AE_TITLE` | `TEST_SCU` | Test client AE Title |
 | `PACS_BIND_ADDR` | `0.0.0.0` | Host interface the published ports bind to. Set to e.g. `127.0.0.1` to expose ports only to the local host (see Security Notes) |
-| `DICOM_PORT` | `11112` | Internal container DICOM port |
+| `DICOM_PORT` | `11112` | Shared internal DICOM port for both PACS, receiver, worklist, healthchecks, and test-client peers |
 | `MAX_PDU_SIZE` | `16384` | Maximum PDU size (bytes) |
 | `MAX_ASSOCIATIONS` | `16` | Maximum concurrent associations |
 | `MAX_STUDIES` | `200` | Maximum studies per storage area |
@@ -40,6 +40,24 @@ cp env.default .env
 | `MR_PIXEL_ROWS` / `MR_PIXEL_COLS` | (profile default) | Override MR dimensions independently of the profile |
 | `CR_PIXEL_ROWS` / `CR_PIXEL_COLS` | (profile default) | Override CR dimensions independently of the profile |
 | `OID_ROOT` | `1.2.826.0.1.3680043.8.499` | OID root for test UIDs |
+
+## Internal and published ports
+
+`DICOM_PORT` changes the listener port inside every managed SCP container and
+the ports used for inter-container queries and C-MOVE routing. For example:
+
+```bash
+DICOM_PORT=12012 docker compose up -d --wait
+```
+
+The published host ports remain `PACS1_HOST_PORT`, `PACS2_HOST_PORT`,
+`STORESCP_HOST_PORT`, and `WLM_HOST_PORT` (defaults 11112 through 11115).
+Thus primary host port 11112 maps to container port 12012 in this example.
+Persist the setting in `.env` for subsequent commands. The restricted and TLS
+overlays inherit the same internal port. `EXPOSE 11112` in the Dockerfile is
+default metadata; it does not restrict the configured listener or publishing.
+Ports in explicitly supplied `EXTRA_PEERS` destinations and manually written
+production configurations remain the operator's responsibility.
 
 ## dcmqrscp Configuration
 

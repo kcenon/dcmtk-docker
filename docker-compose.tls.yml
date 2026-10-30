@@ -30,7 +30,7 @@ services:
     # entrypoint exits 1 before the probe runs, so the failure surfaces as a
     # container that exits with an explicit error, not a hung healthcheck.
     healthcheck:
-      test: ["CMD-SHELL", "echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem +cf /dicom/certs/ca-cert.pem -aet HEALTHCHECK -aec $$AE_TITLE localhost 11112"]
+      test: ["CMD-SHELL", "echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem +cf /dicom/certs/ca-cert.pem -aet HEALTHCHECK -aec $$AE_TITLE localhost $$DICOM_PORT"]
       interval: 10s
       timeout: 5s
       retries: 6

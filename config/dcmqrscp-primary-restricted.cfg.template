@@ -32,9 +32,9 @@ MaxAssociations = ${MAX_ASSOCIATIONS}
 # HostTable: defines known DICOM peers for C-MOVE destinations
 # Format: symbolic_name = (AETitle, hostname, port)
 HostTable BEGIN
-test_client = (${TEST_SCU_AE_TITLE}, test-client, 11112)
-store_scp = (${STORESCP_AE_TITLE}, storescp-receiver, 11112)
-pacs2 = (${PACS2_AE_TITLE}, pacs-server-2, 11112)
+test_client = (${TEST_SCU_AE_TITLE}, test-client, ${DICOM_PORT})
+store_scp = (${STORESCP_AE_TITLE}, storescp-receiver, ${DICOM_PORT})
+pacs2 = (${PACS2_AE_TITLE}, pacs-server-2, ${DICOM_PORT})
 all_peers = test_client, store_scp, pacs2
 HostTable END
 
