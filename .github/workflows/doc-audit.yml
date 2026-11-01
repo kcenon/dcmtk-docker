@@ -1,0 +1,36 @@
+name: Documentation Audit
+
+# README evidence policy (issue #100): run the README lint and its behavior
+# tests when a pull request can change the README or what the lint reads
+# (VERSION for the release link, workflow files for badges). The lint is
+# standard-library Python and never uses the network. See
+# docs/contributing/README_POLICY.md.
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'README.md'
+      - 'VERSION'
+      - 'docs/**'
+      - 'scripts/readme_lint.py'
+      - 'scripts/tests/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  readme-lint:
+    name: README lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test README lint
+        run: python3 -m unittest discover -s scripts/tests -p 'test_readme_lint.py'
+
+      - name: Lint README
+        run: python3 scripts/readme_lint.py README.md

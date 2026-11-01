@@ -5,10 +5,10 @@ set -uo pipefail
 #
 # The synthetic data generator (scripts/generate-test-data.sh) emits every
 # instance as Explicit VR Little Endian (UID 1.2.840.10008.1.2.1) only. This
-# script exercises the *other* uncompressed transfer syntaxes that DCMTK's
-# default storescp/dcmqrscp build accepts, so we have an automated signal
+# script exercises the *other* uncompressed transfer syntaxes that dcmqrscp
+# accepts with its default options, so we have an automated signal
 # when:
-#   - `dcmconv` cannot perform the requested conversion (codec missing),
+#   - `dcmconv` cannot perform the requested conversion,
 #   - the output file's (0002,0010) TransferSyntaxUID does not match the
 #     requested target,
 #   - `storescu` (the SCU) cannot negotiate the resulting transfer syntax
@@ -23,14 +23,17 @@ set -uo pipefail
 #                                                              transfer-syntax
 #                                                              registry.
 #
-# No compressed transfer syntaxes (JPEG / JPEG-LS / RLE / JPEG2000) are
-# exercised here: those require codec libraries (libjpeg, libcharls, ...)
-# that are not part of the Debian `dcmtk` package this image installs.
-# When/if a codec image variant is published, add the matching `dcmconv`
-# flags (`+ej`, `+ee`, `+er`, ...) below.
+# Optional lossless compressed cases are selected with DICOM_TRANSFER_SYNTAX.
+# Each preset must also be configured on both PACS and the C-MOVE receiver.
+# See compressed-transfer-helpers.sh for negotiation and decoded integrity checks.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tests/test-helpers.sh
 source "${SCRIPT_DIR}/test-helpers.sh"
+# shellcheck source=tests/integrity-helpers.sh
+source "${SCRIPT_DIR}/integrity-helpers.sh"
+# shellcheck source=tests/compressed-transfer-helpers.sh
+source "${SCRIPT_DIR}/compressed-transfer-helpers.sh"
 
 # ── Configuration ─────────────────────────────────────
 PACS_HOST="${PACS_HOST:-pacs-server}"
@@ -39,9 +42,9 @@ PACS_AE="${PACS_AE_TITLE:-DCMTK_PACS}"
 MY_AE="${AE_TITLE:-TEST_SCU}"
 TEST_DATA_DIR="${TEST_DATA_DIR:-/dicom/testdata}"
 
-# Uncompressed transfer syntaxes always available with the DCMTK Debian
-# package. Keep this list narrow on purpose; the README documents how to
-# extend it once codec-enabled images ship.
+# Uncompressed transfer syntaxes that dcmqrscp accepts with its default
+# options. Keep this list narrow on purpose; docs/08_test_suite.md documents
+# how to extend it to compressed syntaxes.
 TS_UID_IMPLICIT_LE="1.2.840.10008.1.2"
 TS_UID_EXPLICIT_LE="1.2.840.10008.1.2.1"
 TS_UID_EXPLICIT_BE="1.2.840.10008.1.2.2"
@@ -69,8 +72,9 @@ echo ""
 
 # ── Workspace ─────────────────────────────────────────
 WORKDIR=$(mktemp -d -t transfer-syntax-XXXXXX)
-# shellcheck disable=SC2064
-trap "rm -rf '${WORKDIR}'" EXIT
+echo "Transfer syntax evidence: ${WORKDIR}"
+RESTORE_NEEDED=false
+trap cleanup_transfer_syntax EXIT
 
 # ── Helper: assert (0002,0010) matches an expected UID ─
 assert_transfer_syntax_uid() {
@@ -81,28 +85,12 @@ assert_transfer_syntax_uid() {
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
     local dump got_uid
-    dump=$(dcmdump --search 0002,0010 --print-all "${file}" 2>/dev/null) || {
+    dump=$(dcmdump -Un +P 0002,0010 "${file}" 2>/dev/null) || {
         print_fail "Transfer Syntax: ${label} dcmdump failed (${file})"
         TEST_FAILED=$((TEST_FAILED + 1))
         return 1
     }
-    # dcmdump prints: (0002,0010) UI =LittleEndianExplicit  # 20, 1 TransferSyntaxUID
-    # or the raw UID inside square brackets. Match either form.
-    got_uid=$(echo "${dump}" | grep -m1 '(0002,0010)' \
-        | sed -nE 's/.*\[([0-9.]+)\].*/\1/p')
-
-    if [ -z "${got_uid}" ]; then
-        # Fall back to the symbolic-name form (=LittleEndianImplicit etc.)
-        # and resolve it via a small lookup table.
-        local sym
-        sym=$(echo "${dump}" | grep -m1 '(0002,0010)' \
-            | sed -nE 's/.*=([A-Za-z0-9._]+).*/\1/p')
-        case "${sym}" in
-            LittleEndianImplicit) got_uid="${TS_UID_IMPLICIT_LE}" ;;
-            LittleEndianExplicit) got_uid="${TS_UID_EXPLICIT_LE}" ;;
-            BigEndianExplicit)    got_uid="${TS_UID_EXPLICIT_BE}" ;;
-        esac
-    fi
+    got_uid=$(sed -nE '/^\(0002,0010\)/s/.*\[([0-9.]+)\].*/\1/p' <<<"${dump}")
 
     if [ "${got_uid}" = "${expected_uid}" ]; then
         print_pass "Transfer Syntax: ${label} (0002,0010)=${got_uid}"
@@ -139,16 +127,18 @@ convert_transfer_syntax() {
 }
 
 # ── Helper: storescu acceptance against primary PACS ──
-# Sends a single instance with `+xs` (propose presentation context with the
-# file's own transfer syntax) so the SCP must negotiate the exact syntax we
-# care about, rather than silently re-encoding.
+# Sends a single instance proposing exactly the transfer syntax under test via
+# the matching storescu --propose-* option, so the SCP must negotiate that
+# syntax rather than fall back to a default encoding. The propose flag is
+# passed in by the caller (one of -xe / -xi / -xb).
 assert_storescu_accepts() {
     local label="$1"
     local file="$2"
+    local propose_flag="$3"
 
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
-    if storescu -aet "${MY_AE}" -aec "${PACS_AE}" +xs \
+    if storescu -aet "${MY_AE}" -aec "${PACS_AE}" "${propose_flag}" \
             "${PACS_HOST}" "${PACS_PORT}" "${file}" >/dev/null 2>&1; then
         print_pass "Transfer Syntax: ${label} storescu C-STORE accepted by ${PACS_AE}"
         TEST_PASSED=$((TEST_PASSED + 1))
@@ -161,22 +151,31 @@ assert_storescu_accepts() {
 }
 
 # ── Conversion + acceptance matrix ───────────────────
-# (label, dcmconv flag, expected transfer syntax UID)
+# (label, dcmconv flag, expected transfer syntax UID, storescu propose flag)
 run_case() {
     local label="$1"
     local flag="$2"
     local expected_uid="$3"
+    local propose_flag="$4"
 
     local out_file="${WORKDIR}/${label}.dcm"
 
     convert_transfer_syntax        "${label}" "${flag}" "${SOURCE_FILE}" "${out_file}" || return
     assert_transfer_syntax_uid     "${label}" "${out_file}" "${expected_uid}" || true
-    assert_storescu_accepts        "${label}" "${out_file}" || true
+    assert_storescu_accepts        "${label}" "${out_file}" "${propose_flag}" || true
 }
 
-run_case "explicit-vr-le" "+te" "${TS_UID_EXPLICIT_LE}"
-run_case "implicit-vr-le" "+ti" "${TS_UID_IMPLICIT_LE}"
-run_case "explicit-vr-be" "+tb" "${TS_UID_EXPLICIT_BE}"
+run_case "explicit-vr-le" "+te" "${TS_UID_EXPLICIT_LE}" "-xe"
+run_case "implicit-vr-le" "+ti" "${TS_UID_IMPLICIT_LE}" "-xi"
+run_case "explicit-vr-be" "+tb" "${TS_UID_EXPLICIT_BE}" "-xb"
+
+if [ "${DICOM_TRANSFER_SYNTAX:-uncompressed}" != uncompressed ]; then
+    run_compressed_case || true
+    if run_test "source instance restored after compressed round trip" "Transfer Syntax" \
+            restore_transfer_source; then
+        RESTORE_NEEDED=false
+    fi
+fi
 
 # ── Summary ──────────────────────────────────────────
 print_summary "Transfer Syntax"

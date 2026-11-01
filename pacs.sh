@@ -41,7 +41,7 @@ fi
 # ── Service definitions ──────────────────────────
 ALL_SERVICES=(pacs-server pacs-server-2 storescp-receiver mwl-server test-client)
 SCP_SERVICES=(pacs-server pacs-server-2 storescp-receiver mwl-server)
-VALID_TESTS=(all echo store find move pixeldata transfer-syntax load-smoke worklist adhoc-peers)
+VALID_TESTS=(all echo store find move get pixeldata transfer-syntax load-smoke concurrent-store worklist adhoc-peers)
 
 # ── Helper functions ─────────────────────────────
 info()  { printf "${C_CYAN}>>>${C_RESET} %s\n" "$*"; }
@@ -170,7 +170,7 @@ print_status_table() {
     printf "%-20s %-12s %-14s %-10s\n" "────────────────────" "────────────" "──────────────" "──────────"
 
     for svc in "${ALL_SERVICES[@]}"; do
-        local status ae_title port cid
+        local status_label status_color ae_title port cid
 
         cid=$(service_container_id "${svc}")
 
@@ -184,14 +184,18 @@ print_status_table() {
             health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' "${cid}" 2>/dev/null || echo "-")
         fi
 
+        # Keep the color separate from the label so the ANSI escape bytes do not
+        # count toward the printf field width; otherwise %-Nb on a colored
+        # string misaligns the STATUS column in a TTY. C_* are empty in non-TTY
+        # mode, so the uncolored output is unchanged.
         if [ "${state}" = "running" ] && [ "${health}" = "healthy" ]; then
-            status="${C_GREEN}healthy${C_RESET}"
+            status_label="healthy"; status_color="${C_GREEN}"
         elif [ "${state}" = "running" ] && [ "${health}" = "-" ]; then
-            status="${C_YELLOW}running${C_RESET}"
+            status_label="running"; status_color="${C_YELLOW}"
         elif [ "${state}" = "running" ]; then
-            status="${C_YELLOW}${health}${C_RESET}"
+            status_label="${health}"; status_color="${C_YELLOW}"
         else
-            status="${C_RED}${state}${C_RESET}"
+            status_label="${state}"; status_color="${C_RED}"
         fi
 
         # AE Title from container env
@@ -211,7 +215,12 @@ print_status_table() {
         fi
         [ -z "${port}" ] && port="-"
 
-        printf "%-20s %-22b %-14s %-10s\n" "${svc}" "${status}" "${ae_title}" "${port}"
+        # Pad the uncolored label to the column width first, then wrap the
+        # padded field in color via %b so the escape codes sit outside the
+        # measured width and the STATUS column aligns with its header.
+        local status_field
+        printf -v status_field "%-12s" "${status_label}"
+        printf "%-20s %b %-14s %-10s\n" "${svc}" "${status_color}${status_field}${C_RESET}" "${ae_title}" "${port}"
     done
     printf "\n"
 }
@@ -345,8 +354,19 @@ cmd_test() {
         script="/tests/test-${suite}.sh"
     fi
 
+    # Host environment is not inherited by an exec process in a running
+    # container. Forward only the documented load settings, when provided.
+    # Keep each assignment a single argument; never evaluate its contents.
+    local key
+    local exec_args=(-T)
+    for key in LOAD_SMOKE_PARALLEL LOAD_SMOKE_REPEAT LOAD_SMOKE_TIMEOUT LOAD_SMOKE_FIND_REPS; do
+        if [ "${!key+x}" = x ]; then
+            exec_args+=(-e "${key}=${!key}")
+        fi
+    done
+
     info "Running test suite: ${suite}"
-    ${DC} exec -T test-client bash "${script}" "$@"
+    ${DC} exec "${exec_args[@]}" test-client bash "${script}" "$@"
 }
 
 cmd_logs() {
@@ -535,7 +555,10 @@ ${C_BOLD}Commands:${C_RESET}
   ${C_GREEN}up${C_RESET}                Build and start all services
   ${C_GREEN}down${C_RESET}              Stop all services
   ${C_GREEN}status${C_RESET}            Show service health, ports, and AE titles
-  ${C_GREEN}test${C_RESET} [suite]      Run tests (all, echo, store, find, move, pixeldata, transfer-syntax, load-smoke)
+  ${C_GREEN}test${C_RESET} [suite]      Run tests (all, echo, store, find, move, get, pixeldata,
+                    transfer-syntax, load-smoke, concurrent-store, worklist, adhoc-peers)
+                    Note: the restricted-mode suite is CI-only (compose overlay),
+                    not a './pacs.sh test' target
   ${C_GREEN}logs${C_RESET} [service]    Tail logs (all or specific service)
   ${C_GREEN}shell${C_RESET}             Open bash in the test-client container
   ${C_GREEN}reset${C_RESET}             Stop, wipe volumes, and restart fresh
@@ -564,6 +587,7 @@ ${C_BOLD}Services:${C_RESET}
   pacs-server        Primary PACS (C-ECHO/STORE/FIND/MOVE)
   pacs-server-2      Secondary PACS for multi-PACS tests
   storescp-receiver  Store SCP receiver for C-MOVE testing
+  mwl-server        Modality Worklist SCP (findscu -W)
   test-client        Interactive client with all DCMTK SCU tools
 EOF
 }

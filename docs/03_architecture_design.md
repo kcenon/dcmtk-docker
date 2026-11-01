@@ -3,6 +3,8 @@
 > Architecture document for the Docker-based DCMTK PACS test environment.
 > Based on research from `01_research_dcmtk_dicom.md` and `02_research_docker_approaches.md`.
 
+> **Baseline note:** This document is primarily the 0.1.0 design baseline; some 0.2.0 content is included. README/CHANGELOG are authoritative.
+
 ---
 
 ## Table of Contents
@@ -157,8 +159,8 @@ entrypoint script based on the `ROLE` environment variable.
 ┌──────────────────────────────────────────────┐
 │  Docker Image: dcmtk-pacs                    │
 │                                              │
-│  Base: debian:bookworm-slim                  │
-│  DCMTK: 3.6.7 (via apt)                     │
+│  Base: debian:trixie-slim                  │
+│  DCMTK: 3.6.9 (via apt)                     │
 │                                              │
 │  Installed Tools:                            │
 │    Network: echoscu, storescu, storescp,     │
@@ -188,9 +190,9 @@ entrypoint script based on the `ROLE` environment variable.
 ```dockerfile
 # Build stage (optional: for source build variant)
 # Runtime stage
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
-# Install DCMTK 3.6.7 and utilities
+# Install DCMTK 3.6.9 and utilities
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dcmtk \
     && rm -rf /var/lib/apt/lists/*
@@ -596,7 +598,7 @@ Each template contains the minimum required DICOM attributes:
 
 ```
 dcmtk_docker/
-├── Dockerfile                        # Single image: debian:bookworm-slim + DCMTK 3.6.7
+├── Dockerfile                        # Single image: debian:trixie-slim + DCMTK 3.6.9
 ├── docker-compose.yml                # 4 services: pacs-server, pacs-server-2,
 │                                     #   storescp-receiver, test-client
 ├── env.default                       # Default environment values (copy to .env)
