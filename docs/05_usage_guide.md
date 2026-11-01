@@ -70,7 +70,8 @@ The `up` command automatically:
 # pacs-server          healthy      DCMTK_PACS     11112
 # pacs-server-2        healthy      DCMTK_PAC2     11113
 # storescp-receiver    healthy      STORE_SCP      11114
-# test-client          running      TEST_SCU       -
+# mwl-server           healthy      DCMTK_WLM      11115
+# test-client          healthy      TEST_SCU       -
 
 # Run the full test suite
 ./pacs.sh test
@@ -78,14 +79,18 @@ The `up` command automatically:
 
 ### What Happens on Startup
 
-1. Docker builds a single image from `Dockerfile` (debian:bookworm-slim + DCMTK 3.6.7)
-2. Four containers start, each with a different `ROLE`:
+1. Docker builds a single image from `Dockerfile` (debian:trixie-slim + DCMTK 3.6.9)
+2. Five containers start using the service roles:
    - `pacs-server`: processes `dcmqrscp-primary.cfg.template` → starts `dcmqrscp`
    - `pacs-server-2`: processes `dcmqrscp-secondary.cfg.template` → starts `dcmqrscp`
    - `storescp-receiver`: starts `storescp` with output directory
-   - `test-client`: generates test data → runs `sleep infinity`
-3. Health checks run C-ECHO every 10 seconds to verify PACS readiness
-4. `test-client` waits for `pacs-server` to be healthy before starting
+   - `mwl-server`: generates worklist items → starts `wlmscpfs`
+   - `test-client`: generates test data → reports ready → runs `sleep infinity`
+3. Network service health checks run C-ECHO to verify DICOM readiness
+4. `test-client` waits for both PACS servers, the receiver, and the worklist server
+   to be healthy before starting. Its own health check succeeds only after test
+   data generation finishes, so `docker compose up --wait` waits for complete
+   fixtures as well as ready DICOM services.
 
 ---
 
@@ -97,15 +102,18 @@ The `pacs.sh` script wraps all common operations into short subcommands:
 
 | Command | Action |
 |---------|--------|
-| `./pacs.sh up` | Auto-setup `.env`, build & start, wait for health |
+| `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`, `adhoc-peers`) |
+| `./pacs.sh add-peer <name> <ae> <host> <port>` | Register an ad-hoc C-MOVE destination and restart the PACS |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
 | `./pacs.sh reset` | Wipe volumes and restart fresh |
 | `./pacs.sh clean` | Remove all containers, images, and volumes |
-| `./pacs.sh echo [host] [port]` | Quick C-ECHO connectivity check |
+| `./pacs.sh clean-data [--dry-run]` | Remove host-side generated DICOM data (preserves `data/dicom-templates` fixtures) |
+| `./pacs.sh echo [host] [port] [called-ae] [calling-ae]` | Quick C-ECHO connectivity check |
+| `./pacs.sh version` | Show the dcmtk-docker version |
 | `./pacs.sh help` | Show usage with examples |
 
 All `docker compose` commands still work directly if preferred.
@@ -400,30 +408,12 @@ docker compose restart test-client
 
 ## 6. Configuration Reference
 
-### Environment Variables (Complete List)
+### Environment Variables
 
-| Variable | Default | Used By | Description |
-|----------|---------|---------|-------------|
-| **Service Identity** | | | |
-| `PACS1_AE_TITLE` | `DCMTK_PACS` | pacs-server | Primary PACS Application Entity Title |
-| `PACS2_AE_TITLE` | `DCMTK_PAC2` | pacs-server-2 | Secondary PACS AE Title |
-| `STORESCP_AE_TITLE` | `STORE_SCP` | storescp-receiver | Store SCP receiver AE Title |
-| `TEST_SCU_AE_TITLE` | `TEST_SCU` | test-client | Test client AE Title |
-| **Port Mapping** | | | |
-| `PACS1_HOST_PORT` | `11112` | pacs-server | Host port for primary PACS |
-| `PACS2_HOST_PORT` | `11113` | pacs-server-2 | Host port for secondary PACS |
-| `STORESCP_HOST_PORT` | `11114` | storescp-receiver | Host port for store receiver |
-| `DICOM_PORT` | `11112` | all | Internal container DICOM port |
-| **PACS Tuning** | | | |
-| `MAX_PDU_SIZE` | `16384` | PACS servers | Max Protocol Data Unit (4096-131072) |
-| `MAX_ASSOCIATIONS` | `16` | PACS servers | Max concurrent DICOM associations |
-| `MAX_STUDIES` | `200` | PACS servers | Max studies in storage area |
-| `MAX_BYTES_PER_STUDY` | `1024mb` | PACS servers | Max storage per study |
-| **Logging** | | | |
-| `LOG_LEVEL` | `info` | all | DCMTK log level: debug, info, warn, error |
-| **Test Data** | | | |
-| `GENERATE_TEST_DATA` | `true` | pacs-server, test-client | Auto-generate synthetic DICOM files |
-| `OID_ROOT` | `1.2.826.0.1.3680043.8.499` | generate-test-data.sh | OID root for test UIDs |
+Use the [authoritative environment variable table](09_configuration.md#environment-variables)
+for defaults, worklist settings, host bind addresses, resource limits, ad-hoc
+peers, transfer syntax presets, and PixelData configuration. Copy `env.default`
+to `.env` to customize them; Compose reads `.env` and shell overrides.
 
 ### dcmqrscp Configuration Template Syntax
 
@@ -449,6 +439,7 @@ AETitle  StorageDirectory  AccessMode  (MaxStudies, MaxBytesPerStudy)  Peers
 | `pacs-data` | `/dicom/db` (pacs-server) | Primary PACS storage |
 | `pacs2-data` | `/dicom/db` (pacs-server-2) | Secondary PACS storage |
 | `received-data` | `/dicom/received` (storescp-receiver) | C-MOVE received files |
+| `worklist-data` | `/dicom/worklist` (mwl-server) | Generated worklist items |
 | `./config` (bind) | `/etc/dcmtk` (PACS servers) | Config templates (read-only) |
 | `./data` (bind) | `/dicom/testdata` (test-client) | Test DICOM files |
 | `./tests` (bind) | `/tests` (test-client) | Test scripts (read-only) |
@@ -535,46 +526,51 @@ docker compose run --rm -e ROLE=custom test-client \
 
 ### TLS-Secured DICOM (DICOM TLS)
 
-**Important:** the stock Debian apt `dcmtk` package this image is built on is
-**not** linked against OpenSSL, so its tools reject `+tls` ("Unknown option
-+tls"). TLS therefore cannot be served on the default image. The repository
-ships the complete wiring so a TLS-capable (source-built / OpenSSL-linked) dcmtk
-image can serve TLS without further changes:
+The image uses Debian trixie's DCMTK 3.6.9 with OpenSSL. The TLS overlay
+switches the primary PACS to authenticated `dcmqrscp +tls`; the other four
+services remain cleartext. Incoming storage, query, and C-GET associations
+support TLS. In 3.6.9, outgoing C-MOVE sub-associations remain cleartext and
+`movescu` has no TLS options. `wlmscpfs` also has no TLS options.
 
-- `docker-compose.tls.yml` — an overlay that switches the primary PACS to
-  authenticated `dcmqrscp +tls`.
-- `scripts/gen-certs.sh` — generates a self-signed CA + server + client
-  certificates into the shared `tls-certs` volume at container start.
-- `tests/test-tls.sh` — asserts a `+tls` C-ECHO succeeds while a plaintext
-  association is refused; it skips cleanly when TLS is unavailable.
-
-On the default (non-OpenSSL) image the entrypoint detects the missing `+tls`
-support and, when `TLS_ENABLED=true`, **refuses to start (exit 1)** with a clear
-error rather than silently downgrading to cleartext.
-
-**Running the overlay** (meaningful only on a TLS-capable image):
+`scripts/gen-certs.sh` generates a test CA and server/client certificates in
+the shared `tls-certs` volume. These are test credentials, not production
+certificates. `tests/test-tls.sh` requires a successful authenticated C-ECHO
+and refusal of a plaintext association. It skips only when TLS is disabled;
+missing TLS tools or certificates under the overlay fail the test.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build --wait
 docker compose -f docker-compose.yml -f docker-compose.tls.yml \
     exec test-client /tests/test-tls.sh
 ```
 
-`gen-certs.sh` produces the certificates automatically; the DCMTK TLS tool
-invocations then look like the following (these succeed only against a
-TLS-capable build — on the stock image they fail with "Unknown option +tls"):
+When `TLS_ENABLED=true`, the entrypoint checks `dcmqrscp --help` for
+`--enable-tls` and refuses to start if TLS support is missing. It never
+falls back to plaintext. The healthcheck uses the configured `DICOM_PORT`
+and the client certificate; CI also runs the overlay on port 12012.
 
 ```bash
-# TLS-enabled C-ECHO with the generated client certificate
+# Inside test-client under the overlay:
 echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem \
     +cf /dicom/certs/ca-cert.pem \
-    -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112
+    -aet TEST_SCU -aec DCMTK_PACS pacs-server "$PACS_PORT"
 ```
 
-To actually serve TLS, build the image from an OpenSSL-linked dcmtk (a source
-build) in place of the stock apt package.
+Use the default cleartext stack for the general suite (`./pacs.sh test all`);
+its individual SCU commands do not automatically acquire TLS flags from the
+overlay. To switch back, recreate services with only `docker-compose.yml`.
+
+For a TLS check without starting the PACS, run the
+[independent storescp test](08_test_suite.md#independent-tls-runtime-check).
+It uses an ephemeral container-local listener; no receiver profile or host
+port is exposed.
 
 ### Adding Additional PACS Nodes
+
+The defaults already use host ports 11112 (primary PACS), 11113 (secondary
+PACS), 11114 (store receiver), and 11115 (worklist). The example below uses
+11116 for a third PACS. It shares the configured internal `DICOM_PORT` and
+host bind address with the existing services.
 
 To add a third PACS node, extend `docker-compose.yml`:
 
@@ -586,7 +582,7 @@ pacs-server-3:
   environment:
     - ROLE=pacs-server
     - AE_TITLE=DCMTK_PAC3
-    - DICOM_PORT=11112
+    - DICOM_PORT=${DICOM_PORT:-11112}
     - STORAGE_DIR=/dicom/db
     - CONFIG_TEMPLATE=/etc/dcmtk/dcmqrscp-primary.cfg.template
     # Add other PACS nodes to this node's HostTable
@@ -594,14 +590,14 @@ pacs-server-3:
     - STORESCP_AE_TITLE=STORE_SCP
     - TEST_SCU_AE_TITLE=TEST_SCU
   ports:
-    - "11115:11112"
+    - "${PACS_BIND_ADDR:-0.0.0.0}:11116:${DICOM_PORT:-11112}"
   volumes:
     - pacs3-data:/dicom/db
     - ./config:/etc/dcmtk:ro
   networks:
     - dicom-net
   healthcheck:
-    test: ["CMD", "echoscu", "localhost", "11112"]
+    test: ["CMD-SHELL", "echoscu -aec $$AE_TITLE localhost $$DICOM_PORT"]
     interval: 10s
     timeout: 5s
     retries: 3

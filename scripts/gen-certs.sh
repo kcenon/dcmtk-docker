@@ -16,9 +16,14 @@ DAYS="${TLS_CERT_DAYS:-3650}"
 mkdir -p "${CERT_DIR}"
 C="${CERT_DIR}"
 
-# Idempotent: skip if a full set already exists (e.g. on container restart or
-# when a peer already generated them into the shared volume).
-if [ -f "${C}/server-cert.pem" ] && [ -f "${C}/client-cert.pem" ] && [ -f "${C}/ca-cert.pem" ]; then
+# Idempotent: skip only if a full set (cert AND matching key for the CA,
+# server, and client) already exists, e.g. on container restart or when a peer
+# already generated them into the shared volume. Requiring the keys too means a
+# partially-wiped cert directory regenerates the missing material instead of
+# deferring the failure to dcmqrscp +tls startup.
+if [ -f "${C}/ca-cert.pem" ] && [ -f "${C}/ca-key.pem" ] \
+   && [ -f "${C}/server-cert.pem" ] && [ -f "${C}/server-key.pem" ] \
+   && [ -f "${C}/client-cert.pem" ] && [ -f "${C}/client-key.pem" ]; then
     echo "[gen-certs] certificates already present in ${C}, skipping."
     exit 0
 fi

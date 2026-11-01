@@ -18,7 +18,8 @@ what the changelog describes.
 
 1. Ensure `develop` is green and the issues for the release milestone are closed.
 2. **Bump the version**: set `VERSION` to the new `X.Y.Z` (SemVer — MINOR for
-   new features, PATCH for fixes).
+   new features, PATCH for fixes), and point the README status line's release
+   link at `vX.Y.Z` (`scripts/readme_lint.py` fails while they differ).
 3. **Roll the changelog**: in `CHANGELOG.md`, rename `## [Unreleased]` to
    `## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it, and
    refresh the compare links at the bottom of the file.
@@ -43,12 +44,32 @@ what the changelog describes.
 - Commit messages, issues, and PRs are in English (documents may be Korean); no
   AI attribution.
 
-> **Follow-up:** as of this writing `main` is **not yet protected**
-> (`gh api repos/kcenon/dcmtk-docker/branches/main/protection` returns 404).
-> Enable protection before relying on this process — at minimum require a pull
-> request and forbid force-pushes and branch deletion. This needs admin rights.
+> **Protection status:** `main` is protected (enabled 2026-05-31, issue #82).
+> A pull request is required before merging (0 required approvals, so a solo
+> maintainer is not locked out), force-pushes and branch deletion are forbidden,
+> and the full CI matrix is required and must be up to date before merge
+> (`strict`): the twelve isolation/aggregator/security checks that the
+> `develop`→`main` promotion runs (see #81). Protection is intentionally not
+> enforced against admins (`enforce_admins: false`, mirroring `develop`), so the
+> owner retains an emergency-merge path. Inspect the live rules with
+> `gh api repos/kcenon/dcmtk-docker/branches/main/protection`.
 
 ## Verifying after a release
+
+The Test Isolation workflow reports its existing check names on every pull
+request to `develop` or `main`, including documentation and version-only
+changes. A first job classifies the changed paths. Each matrix entry and other
+test job still runs, but skips its Docker steps for documentation-only changes.
+A failed path decision fails the dependent checks rather than approving a skip.
+Unknown paths conservatively run the runtime tests; manual dispatch runs them
+all. Runtime changes, including `pacs.sh`, `env.default`, `patches/`, and Compose
+files, run the usual suites. Required check names and branch protections remain
+unchanged. This avoids the missing-context block on release metadata PRs (#108).
+
+The classifier's host tests cover documentation, runtime, workflow and mixed
+changes, renames, divergent PR bases, and invalid commits. `actionlint` validates
+the workflow expressions. These local checks do not substitute for inspecting
+the actual GitHub Actions results on a pull request before merging.
 
 ```bash
 git show main:VERSION          # the new X.Y.Z

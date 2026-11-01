@@ -17,10 +17,11 @@ set -euo pipefail
 # so the destination works in both the default (ANY) and restricted (all_peers)
 # AETable modes. The all_peers match also accepts an indented line (e.g. the
 # production example). If the config has no `all_peers` line, entries are
-# inserted before `HostTable END` instead. Malformed entries (not exactly
-# name=AE:host:port, an empty field, or a non-numeric port) are skipped with a
-# warning rather than corrupting the config. awk is used (not sed) so the
-# behavior is identical on the Linux container and a macOS host.
+# inserted before `HostTable END` instead. Invalid entries are skipped with a
+# warning rather than corrupting the config: a malformed shape (not exactly
+# name=AE:host:port or an empty field), a non-numeric or out-of-range port
+# (must be 1-65535), or a symbolic name already seen in this batch. awk is used
+# (not sed) so the behavior is identical on the Linux container and a macOS host.
 
 CFG="${1:?usage: inject-extra-peers.sh <config_file>}"
 
@@ -54,6 +55,19 @@ BEGIN {
             print "inject-extra-peers: skipping peer with non-numeric port: " arr[i] > "/dev/stderr"
             continue
         }
+        # Reject ports outside the valid TCP range (1-65535). +hp[3] forces a
+        # numeric comparison; leading zeros are tolerated by the regex above.
+        if (+hp[3] < 1 || +hp[3] > 65535) {
+            print "inject-extra-peers: skipping peer with out-of-range port (1-65535): " arr[i] > "/dev/stderr"
+            continue
+        }
+        # Reject a symbolic name already seen in this batch; a duplicate
+        # HostTable definition would shadow the first and corrupt all_peers.
+        if (kv[1] in seen) {
+            print "inject-extra-peers: skipping peer with duplicate name: " arr[i] > "/dev/stderr"
+            continue
+        }
+        seen[kv[1]] = 1
         valid++
         entries[valid] = kv[1] " = (" hp[1] ", " hp[2] ", " hp[3] ")"
         names = names ", " kv[1]

@@ -131,10 +131,11 @@ run_test_expect_fail() {
     shift 2
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
-    local output=""
-    output=$("$@" 2>&1) || true
+    local rc=0
+    local output
+    output=$("$@" 2>&1) || rc=$?
 
-    if ! "$@" >/dev/null 2>&1; then
+    if [ "$rc" -ne 0 ]; then
         print_pass "${prefix}: ${description}"
         TEST_PASSED=$((TEST_PASSED + 1))
         return 0
@@ -330,9 +331,9 @@ receiver_cleanup_storage() {
         return 1
     fi
 
-    # Delete every regular file and empty sub-directory below storage_dir,
-    # but keep storage_dir itself so storescp can continue writing.
-    find "${storage_dir}" -mindepth 1 -delete 2>/dev/null || true
+    # storescp caches its most recent study directory. Keep directories so
+    # consecutive retrievals of that study can still write after cleanup.
+    find "${storage_dir}" -type f -delete 2>/dev/null || return 1
     print_verbose "receiver_cleanup_storage: wiped ${storage_dir}"
     return 0
 }
