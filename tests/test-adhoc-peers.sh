@@ -5,9 +5,8 @@ set -euo pipefail
 # Verifies that scripts/inject-extra-peers.sh injects EXTRA_PEERS into a rendered
 # dcmqrscp HostTable correctly: each peer becomes a HostTable entry defined BEFORE
 # the all_peers reference, and the symbolic name is appended to all_peers. The
-# end-to-end C-MOVE to an injected destination is exercised by the host-side
-# verification recorded in the PR; here we test the rendering logic in isolation
-# so it cannot regress.
+# end-to-end delivery test in test-adhoc-cmove.sh covers C-MOVE to the injected
+# destination in CI. This script tests the rendering logic in isolation.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/test-helpers.sh"

@@ -17,7 +17,10 @@ dcmtk-docker/
 ├── RELEASE.md                          # Release process (develop to main, tagging)
 ├── LICENSE                             # MIT license
 ├── .dockerignore                       # Build context exclusions
+├── .github/
+│   └── workflows/                      # Documentation, isolation, and release CI
 ├── README.md                           # Entry page: status, quick start, docs links
+├── patches/                            # Patches applied to Debian DCMTK sources
 ├── config/
 │   ├── dcmqrscp-primary.cfg.template              # Primary PACS config template
 │   ├── dcmqrscp-secondary.cfg.template            # Secondary PACS config template
@@ -25,6 +28,7 @@ dcmtk-docker/
 │   ├── dcmqrscp-secondary-restricted.cfg.template # Secondary, AE-whitelist variant
 │   └── dcmqrscp-production.cfg.example            # AE-whitelist reference config
 ├── scripts/
+│   ├── ci_runtime_changes.py           # Classify changes for Docker CI
 │   ├── entrypoint.sh                   # Role-based startup dispatcher
 │   ├── fixture-manifest.sh             # Shared fixture identity (SSOT)
 │   ├── gen-certs.sh                    # Self-signed TLS test certificates
@@ -33,6 +37,8 @@ dcmtk-docker/
 │   ├── inject-extra-peers.sh           # Ad-hoc C-MOVE HostTable injection
 │   ├── pixel-data-profile.sh           # Shared PixelData profile defaults
 │   ├── readme_lint.py                  # README policy lint (CI only, not in the image)
+│   ├── test-load-verdict.sh            # Classify load test results
+│   ├── test-storage-recovery.sh        # Verify storage recovery behavior
 │   ├── wait-for-pacs.sh                # Readiness polling
 │   └── tests/
 │       └── test_readme_lint.py         # Behavior tests for readme_lint.py
@@ -46,14 +52,19 @@ dcmtk-docker/
 │   ├── test-store.sh                   # C-STORE tests
 │   ├── test-find.sh                    # C-FIND tests
 │   ├── test-move.sh                    # C-MOVE tests
+│   ├── test-get.sh                     # C-GET tests
 │   ├── test-pixeldata.sh               # PixelData smoke tests
 │   ├── test-transfer-syntax.sh         # Transfer-syntax compatibility tests
 │   ├── test-load-smoke.sh              # Operational load smoke tests
+│   ├── test-concurrent-store.sh        # Concurrent C-STORE tests
 │   ├── test-restricted-mode.sh         # AE-whitelist rejection tests
 │   ├── test-worklist.sh                # Modality Worklist (findscu -W) tests
 │   ├── test-adhoc-peers.sh             # Ad-hoc C-MOVE peer injection tests
 │   ├── test-adhoc-cmove.sh             # Ad-hoc C-MOVE end-to-end delivery test
 │   ├── test-tls.sh                     # TLS secure-transport tests
+│   ├── test-tls-runtime.sh             # TLS runtime validation tests
+│   ├── compressed-transfer-helpers.sh  # Shared compressed transfer helpers
+│   ├── integrity-helpers.sh            # Shared fixture integrity checks
 │   ├── test-helpers.sh                 # Shared test helpers
 │   └── test-all.sh                     # Full test suite runner
 └── docs/

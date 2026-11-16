@@ -8,7 +8,7 @@ Part of the dcmtk-docker documentation; start from the [README](../README.md).
 2. **Check the AE Title**: DICOM AE Titles are case-sensitive. Use exactly `DCMTK_PACS`, not `dcmtk_pacs`.
    The PACS healthcheck issues `echoscu -aec ${AE_TITLE}` against itself, so a container will be marked
    `unhealthy` if the configured `AE_TITLE` does not match what `dcmqrscp` actually loaded.
-3. **Check the port**: All containers listen on internal port `11112`. Host ports differ (11112, 11113, 11114, 11115)
+3. **Check the port**: The four DICOM listeners use `DICOM_PORT` inside Docker (default `11112`). The default published host ports are 11112, 11113, 11114, and 11115. Use the configured internal port for calls between containers.
 4. **Check the network**: Services must be on the same Docker network (`dicom-net`)
 
 ```bash
@@ -32,10 +32,14 @@ C-MOVE requires the destination AE to be registered in the PACS HostTable.
 
 ## "No such SOP Class" / Transfer syntax errors
 
-The PACS servers accept only uncompressed transfer syntaxes: the entrypoint
-starts `dcmqrscp` with its default preference (`+x=`). Decompress a file before
-storing it. `dcmconv` cannot decode compressed pixel data, so use the decoder
-that matches the compression:
+Uncompressed transfer is the default. Set `DICOM_TRANSFER_SYNTAX` to
+`jpeg-lossless`, `jpeg-ls-lossless`, or `rle-lossless` to negotiate the
+corresponding compressed syntax. See [Lossless transfer syntax presets](09_configuration.md#lossless-transfer-syntax-presets)
+for the incoming and outgoing options.
+
+If the sender and receiver cannot negotiate the file's syntax, decompress it
+before storing it. Use the decoder that matches the compression because
+`dcmconv` cannot decode compressed pixel data:
 
 ```bash
 # JPEG (use dcmdjpls for JPEG-LS and dcmdrle for RLE)
