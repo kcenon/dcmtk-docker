@@ -73,7 +73,7 @@ the four published ports bind to:
 
 ```
 ports:
-  - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS1_HOST_PORT:-11112}:11112"
+  - "${PACS_BIND_ADDR:-0.0.0.0}:${PACS1_HOST_PORT:-11112}:${DICOM_PORT:-11112}"
 ```
 
 The default `0.0.0.0` preserves the original behavior (CI and the test

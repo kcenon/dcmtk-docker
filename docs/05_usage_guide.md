@@ -26,7 +26,7 @@
 | Docker Engine | 20.10+ | `docker --version` |
 | Docker Compose | V2 (built-in) | `docker compose version` |
 | Disk space | ~200 MB | — |
-| Available ports | 11112-11114 | `lsof -i :11112` |
+| Available host ports | 11112-11115 (defaults) | `lsof -iTCP:11112-11115 -sTCP:LISTEN` |
 
 Optional (for host-side DICOM operations):
 - DCMTK tools installed locally: `apt install dcmtk` / `brew install dcmtk`
@@ -47,7 +47,7 @@ cd dcmtk_docker
 
 The `up` command automatically:
 1. Copies `env.default` to `.env` if `.env` doesn't exist
-2. Builds the Docker image and starts all 4 services
+2. Builds the Docker image and starts all five services
 3. Waits for health checks to pass
 4. Displays a status table showing service health, ports, and AE titles
 
@@ -105,7 +105,7 @@ The `pacs.sh` script wraps all common operations into short subcommands:
 | `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `worklist`, `adhoc-peers`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `get`, `pixeldata`, `transfer-syntax`, `load-smoke`, `concurrent-store`, `worklist`, `adhoc-peers`) |
 | `./pacs.sh add-peer <name> <ae> <host> <port>` | Register an ad-hoc C-MOVE destination and restart the PACS |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
