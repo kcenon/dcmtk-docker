@@ -96,6 +96,8 @@ MANIFEST_STUDY_DATE_RANGE="20240101-20240331"
 # Identifiers guaranteed NOT to exist in the dataset, for negative tests.
 MANIFEST_NONEXISTENT_PATIENT_ID="NONEXISTENT"
 MANIFEST_NONEXISTENT_STUDY_UID="1.2.3.999.999.999"
+# A real modality code that no fixture series uses.
+MANIFEST_NONEXISTENT_MODALITY="US"
 
 # ── Modality Worklist (MWL) ─────────────────────────────────────────────────
 # The MWL SCP (wlmscpfs) serves scheduled procedure steps that reuse the patient
