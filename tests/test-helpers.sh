@@ -147,44 +147,45 @@ run_test_expect_fail() {
 }
 
 # ── C-FIND response counting ──────────────────────────
-# Count UID lines from a `findscu -v` capture that belong to response
-# datasets (not the request key echo).
+# Count the matches in a `findscu -v` capture from its DIMSE responses.
 #
-# Verbose findscu prints each request key once before the association,
-# typically as
-#   (0020,000d) UI (no value available)         #   0, 1 StudyInstanceUID
-# and then prints one response dataset per match, where the same tag
-# carries an actual UID value. Counting bare "StudyInstanceUID"
-# occurrences therefore inflates the result by exactly one per request
-# key. Filtering out lines that contain "no value available" leaves only
-# response datasets.
+# Verbose findscu logs one line per pending C-FIND response, e.g.
+#   I: Find Response: 1 (Pending)
+# followed by the matched identifier, and ends with
+#   I: Received Final Find Response (Success)
+# Each match produces exactly one pending line, at every query level.
+# The capture must come from `findscu -v` without `-d`: in debug mode
+# findscu logs `Received Find Response N` instead.
+#
+# Counting UID lines instead is wrong: the request-key echo carries a
+# value whenever the key is a matching key (e.g. StudyInstanceUID in a
+# SERIES query), and a SERIES or IMAGE response repeats the UIDs of the
+# levels above it, so one match yields several UID lines (#131).
+#
+# The pattern matches only the start of the status text, so the
+# warning variant `(Pending: WarningUnsupportedOptionalKeys)` (0xFF01)
+# is counted as well.
 #
 # The helper also strips NUL bytes from the captured output. `findscu`
 # can emit raw DICOM bytes on stderr when servers misbehave, which makes
 # shell `grep` warn `ignored null byte in input` and pollutes the test
 # log.
 #
+# A failed query (association rejected, SCP unreachable) has no pending
+# lines and therefore counts as 0; callers that must tell "no match"
+# from "query failed" have to check the findscu exit status and the
+# final Success response themselves.
+#
 # Output: a single non-negative integer on stdout, nothing else.
 #
-# Usage: count_find_responses "<findscu -v output>" [tag1 tag2 ...]
-#   When no tags are supplied the default set covers the three common
-#   query-retrieve level UIDs.
+# Usage: count_find_responses "<findscu -v output>"
 count_find_responses() {
     local output="$1"
-    shift
-    local tags=("$@")
-    if [ "${#tags[@]}" -eq 0 ]; then
-        tags=(StudyInstanceUID SeriesInstanceUID SOPInstanceUID)
-    fi
-
-    local pattern
-    pattern="$(IFS='|'; printf '%s' "${tags[*]}")"
 
     local count
     count=$(printf '%s' "${output}" \
         | tr -d '\0' \
-        | grep -E "${pattern}" \
-        | grep -vc "no value available" \
+        | grep -cE 'Find Response: [0-9]+ \(Pending' \
         || true)
 
     # `grep -c` with no matches exits 1; `|| true` suppresses set -e but
@@ -238,7 +239,7 @@ ensure_pacs_data() {
         -S "${pacs_host}" "${pacs_port}" \
         -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID 2>&1 \
         | tr -d '\0' || true)
-    existing=$(count_find_responses "${check_output}" StudyInstanceUID)
+    existing=$(count_find_responses "${check_output}")
 
     if [ "${existing}" -lt "${MANIFEST_STUDY_COUNT}" ]; then
         echo "Loading test data into PACS..."
@@ -287,7 +288,7 @@ ensure_clean_pacs() {
         -S "${pacs_host}" "${pacs_port}" \
         -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID 2>&1 \
         | tr -d '\0' || true)
-    remaining=$(count_find_responses "${check_output}" StudyInstanceUID)
+    remaining=$(count_find_responses "${check_output}")
 
     if [ "${remaining}" -gt 0 ]; then
         echo "ERROR: ensure_clean_pacs: ${remaining} studies remain on ${pacs_ae}@${pacs_host}:${pacs_port}" >&2
