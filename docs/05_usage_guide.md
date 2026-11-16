@@ -242,7 +242,6 @@ findscu -v -S -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112 \
     -k PatientID \
     -k StudyDate \
     -k StudyDescription \
-    -k ModalitiesInStudy \
     -k StudyInstanceUID \
     -k NumberOfStudyRelatedSeries \
     -k NumberOfStudyRelatedInstances
@@ -266,14 +265,12 @@ findscu -v -S -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112 \
     -k StudyDate="20240101-20240331" \
     -k PatientName \
     -k StudyInstanceUID
-
-# Find by modality
-findscu -v -S -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112 \
-    -k QueryRetrieveLevel=STUDY \
-    -k ModalitiesInStudy="MR" \
-    -k PatientName \
-    -k StudyInstanceUID
 ```
+
+This PACS (`dcmqrscp`) does not support `ModalitiesInStudy`. It ignores the
+key as a filter, so a STUDY-level `ModalitiesInStudy` query returns every
+study, and it leaves the key out of responses. To filter by modality, query
+the SERIES level within a study with `Modality`, as shown below.
 
 #### Series-Level Queries
 
@@ -286,6 +283,13 @@ findscu -v -S -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112 \
     -k Modality \
     -k SeriesNumber \
     -k SeriesDescription
+
+# Find series by modality within a known study
+findscu -v -S -aet TEST_SCU -aec DCMTK_PACS pacs-server 11112 \
+    -k QueryRetrieveLevel=SERIES \
+    -k StudyInstanceUID="1.2.826.0.1.3680043.8.499.2.1" \
+    -k Modality="MR" \
+    -k SeriesInstanceUID
 ```
 
 ### 4.4 C-MOVE (Retrieve)

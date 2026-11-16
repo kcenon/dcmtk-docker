@@ -69,6 +69,42 @@ run_find_test() {
     fi
 }
 
+# ── C-FIND zero-match runner ──────────────────────────
+# Runs findscu and requires exit code 0, a final Success response and no
+# matches, so a rejected or failed query cannot pass as "no matches".
+# The exit code alone is not enough: findscu exits 0 when dcmqrscp ends
+# the query with a failure status such as "Failed: UnableToProcess".
+# Usage: run_find_none_test "description" <findscu command...>
+run_find_none_test() {
+    local description="$1"
+    shift
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local output rc=0
+    output=$("$@" 2>&1 | tr -d '\0') || rc=$?
+
+    local match_count final=missing
+    match_count=$(count_find_responses "${output}")
+    if grep -Eq '(Final Find Response|Find Response:).*\(Success\)' <<< "${output}"; then
+        final=success
+    fi
+
+    if [ "${rc}" -eq 0 ] && [ "${final}" = success ] && [ "${match_count}" -eq 0 ]; then
+        print_pass "C-FIND: ${description}"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "C-FIND: ${description} (exit ${rc}, final response ${final}, found ${match_count})"
+    if [ "${VERBOSE}" = "true" ]; then
+        echo "${output}" | tail -10 | while IFS= read -r line; do
+            print_verbose "${line}"
+        done
+    fi
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
 # ── Preamble: verify required SCPs are reachable ──────
 # Make the precondition explicit so this script can be invoked in any
 # order. ensure_pacs_data() is called below, but the C-ECHO check fails
@@ -106,14 +142,18 @@ run_find_test "patient name DOE* (STUDY level)" min 1 \
         -k PatientName="${MANIFEST_CT_PATIENT_NAME%%^*}*" \
         -k StudyInstanceUID || true
 
-# Test 4: Query by modality
-run_find_test "modality filter CT (STUDY level)" min 1 \
+# Test 4: Query by modality. dcmqrscp does not support ModalitiesInStudy and
+# drops it from the query, so a STUDY-level filter on it returns every study.
+# Filter on Modality at the SERIES level within the CT study instead; Test 11
+# shows the filter excludes a modality the fixture does not use. The test
+# keeps its number and place so references to later test numbers stay valid.
+run_find_test "modality filter CT (SERIES level)" exact 1 \
     findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
         -S "${PACS_HOST}" "${PACS_PORT}" \
-        -k QueryRetrieveLevel=STUDY \
-        -k ModalitiesInStudy="${MANIFEST_CT_MODALITY}" \
-        -k PatientName \
-        -k StudyInstanceUID || true
+        -k QueryRetrieveLevel=SERIES \
+        -k StudyInstanceUID="${MANIFEST_CT_STUDY_UID}" \
+        -k Modality="${MANIFEST_CT_MODALITY}" \
+        -k SeriesInstanceUID || true
 
 # Test 5: Query by exact study date
 run_find_test "date filter 20240115 (STUDY level)" min 1 \
@@ -174,31 +214,22 @@ fi
 # Test 10: SERIES query for an unknown study returns 0 results. The
 # query must also end with a final Success response, so a rejected or
 # failed association cannot pass as "no matches".
-TEST_TOTAL=$((TEST_TOTAL + 1))
-NEG_SERIES_RC=0
-NEG_SERIES_OUTPUT=$(findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
-    -S "${PACS_HOST}" "${PACS_PORT}" \
-    -k QueryRetrieveLevel=SERIES \
-    -k StudyInstanceUID="${MANIFEST_NONEXISTENT_STUDY_UID}" \
-    -k SeriesInstanceUID 2>&1 | tr -d '\0') || NEG_SERIES_RC=$?
-NEG_SERIES_COUNT=$(count_find_responses "${NEG_SERIES_OUTPUT}")
-NEG_SERIES_FINAL=missing
-if grep -Eq '(Final Find Response|Find Response:).*\(Success\)' <<< "${NEG_SERIES_OUTPUT}"; then
-    NEG_SERIES_FINAL=success
-fi
-if [ "${NEG_SERIES_RC}" -eq 0 ] && [ "${NEG_SERIES_FINAL}" = success ] \
-        && [ "${NEG_SERIES_COUNT}" -eq 0 ]; then
-    print_pass "C-FIND: unknown study returns 0 series (SERIES level)"
-    TEST_PASSED=$((TEST_PASSED + 1))
-else
-    print_fail "C-FIND: unknown study returns 0 series (SERIES level) (exit ${NEG_SERIES_RC}, final response ${NEG_SERIES_FINAL}, found ${NEG_SERIES_COUNT})"
-    if [ "${VERBOSE}" = "true" ]; then
-        echo "${NEG_SERIES_OUTPUT}" | tail -10 | while IFS= read -r line; do
-            print_verbose "${line}"
-        done
-    fi
-    TEST_FAILED=$((TEST_FAILED + 1))
-fi
+run_find_none_test "unknown study returns 0 series (SERIES level)" \
+    findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
+        -S "${PACS_HOST}" "${PACS_PORT}" \
+        -k QueryRetrieveLevel=SERIES \
+        -k StudyInstanceUID="${MANIFEST_NONEXISTENT_STUDY_UID}" \
+        -k SeriesInstanceUID || true
+
+# Test 11: The SERIES-level Modality filter excludes a modality the fixture
+# does not use. If the PACS ignored the key, the CT series would match.
+run_find_none_test "modality ${MANIFEST_NONEXISTENT_MODALITY} absent from CT study returns 0 series (SERIES level)" \
+    findscu -v -aet "${MY_AE}" -aec "${PACS_AE}" \
+        -S "${PACS_HOST}" "${PACS_PORT}" \
+        -k QueryRetrieveLevel=SERIES \
+        -k StudyInstanceUID="${MANIFEST_CT_STUDY_UID}" \
+        -k Modality="${MANIFEST_NONEXISTENT_MODALITY}" \
+        -k SeriesInstanceUID || true
 
 # ── Summary ───────────────────────────────────────────
 print_summary "C-FIND"
