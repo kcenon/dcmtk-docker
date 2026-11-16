@@ -27,7 +27,8 @@ The synthetic data generator emits every instance as Explicit VR Little
 Endian. The `transfer-syntax` suite (`tests/test-transfer-syntax.sh`) takes
 that source instance and uses `dcmconv` to convert it to the three
 uncompressed syntaxes that `dcmqrscp` accepts with its default options,
-then verifies `storescu` can negotiate each one against the primary PACS:
+then verifies that `storescu` sends each one to the primary PACS without
+converting it and that the PACS archives it in that syntax:
 
 | Label            | Transfer Syntax UID    | `dcmconv` flag |
 |------------------|------------------------|----------------|
