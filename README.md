@@ -1,6 +1,6 @@
 # DCMTK PACS Test Environment
 
-**Status: active** | **Latest release:** [v0.2.0](https://github.com/kcenon/dcmtk-docker/releases/tag/v0.2.0) ([changelog](CHANGELOG.md))
+**Status: active** | **Latest release:** [v0.3.0](https://github.com/kcenon/dcmtk-docker/releases/tag/v0.3.0) ([changelog](CHANGELOG.md))
 
 A Docker-based PACS integration test environment using DCMTK.
 `./pacs.sh up` starts two query/retrieve PACS servers, a C-STORE receiver, a
