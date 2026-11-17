@@ -118,6 +118,28 @@ The `pacs.sh` script wraps all common operations into short subcommands:
 
 All `docker compose` commands still work directly if preferred.
 
+### Overlays and `pacs.sh`
+
+`pacs.sh` passes no `-f` to `docker compose`, so Compose takes the file list
+from `COMPOSE_FILE` in the environment or `.env`, or else uses
+`docker-compose.yml`. To start an overlay through `pacs.sh`, name it in
+`COMPOSE_FILE`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker-compose.tls.yml ./pacs.sh up
+```
+
+Compose separates the files with `:`. The Windows `docker`, which Git Bash
+runs, uses `;` instead, so quote the value there:
+`COMPOSE_FILE='docker-compose.yml;docker-compose.tls.yml' ./pacs.sh up`.
+
+While containers of the stack exist, `up`, `reset` and `add-peer` use the
+compose files those containers were started with, also when the stack was
+started with `docker compose -f`, and ahead of `COMPOSE_FILE`. If the
+containers were started with different files, or one of the files is gone,
+the command stops without changing anything. To change overlays, run
+`./pacs.sh down` first.
+
 ### Starting Services
 
 ```bash
@@ -562,7 +584,9 @@ echoscu +tls /dicom/certs/client-key.pem /dicom/certs/client-cert.pem \
 
 Use the default cleartext stack for the general suite (`./pacs.sh test all`);
 its individual SCU commands do not automatically acquire TLS flags from the
-overlay. To switch back, recreate services with only `docker-compose.yml`.
+overlay. To switch back, run `./pacs.sh down` and start again without the
+overlay. While the TLS containers exist, `./pacs.sh up`, `reset` and
+`add-peer` keep the overlay (see [Overlays and `pacs.sh`](#overlays-and-pacssh)).
 
 For a TLS check without starting the PACS, run the
 [independent storescp test](08_test_suite.md#independent-tls-runtime-check).
