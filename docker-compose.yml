@@ -56,7 +56,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # dcmqrscp starts only after the test data is generated; the realistic
+      # PixelData profile takes about a minute at the 1-CPU limit, and an
+      # unhealthy PACS stops the test-client's depends_on. A passing probe
+      # still marks the service healthy at once.
+      start_period: 180s
     restart: unless-stopped
 
   # ── Secondary PACS Server ──────────────────────────

@@ -47,10 +47,45 @@ if [ -n "${PIXEL_DATA_ROWS:-}" ] || [ -n "${PIXEL_DATA_COLS:-}" ]; then
     echo "[generate-test-data]          Use {CT,MR,CR}_PIXEL_ROWS / _COLS or PIXEL_DATA_PROFILE instead." >&2
 fi
 
-# Skip if test data already exists
-if [ -d "${OUTPUT_DIR}" ] && [ "$(find "${OUTPUT_DIR}" -name '*.dcm' 2>/dev/null | wc -l)" -gt 0 ]; then
-    echo "[generate-test-data] Test data already exists in ${OUTPUT_DIR}, skipping."
+# Reuse existing output only when it is this generator's own, complete output
+# for the current settings (#138). Only ct/, mr/ and cr/ count, so a user's
+# own DICOM files elsewhere under OUTPUT_DIR do not stop generation. Each
+# folder must hold at least the manifest's instance count, and its first
+# instance must carry the SOP Instance UID (OID_ROOT) and the PixelData state
+# (absent, or present with the configured Rows and Columns) that the current
+# settings produce. Otherwise a settings change, such as GENERATE_PIXEL_DATA=true
+# after a default run, would keep the old files: `docker compose down -v` does
+# not remove the bind-mounted ./data. The check reads the files themselves
+# because a marker file in these folders would break `storescu +sd` scans.
+existing_output_is_current() {
+    local mod count file uid rows cols want have
+    for mod in ct mr cr; do
+        case "${mod}" in
+            ct) count="${MANIFEST_CT_COUNT}"; file="ct_pat001_1.dcm"
+                uid="${MANIFEST_CT_SERIES_UID}.1"; rows="${CT_PIXEL_ROWS}"; cols="${CT_PIXEL_COLS}" ;;
+            mr) count="${MANIFEST_MR_COUNT}"; file="mr_pat002_s1_1.dcm"
+                uid="${MANIFEST_MR_T1_SERIES_UID}.1"; rows="${MR_PIXEL_ROWS}"; cols="${MR_PIXEL_COLS}" ;;
+            cr) count="${MANIFEST_CR_COUNT}"; file="cr_pat003_1.dcm"
+                uid="${MANIFEST_CR_SERIES_UID}.1"; rows="${CR_PIXEL_ROWS}"; cols="${CR_PIXEL_COLS}" ;;
+        esac
+        [ "$(find "${OUTPUT_DIR}/${mod}" -maxdepth 1 -name '*.dcm' 2>/dev/null | wc -l)" -ge "${count}" ] || return 1
+        want="(0008,0018) [${uid}]"
+        if [ "${GENERATE_PIXEL_DATA}" = "true" ]; then
+            want+=$'\n'"(0028,0010) ${rows}"$'\n'"(0028,0011) ${cols}"$'\n'"(7fe0,0010)"
+        fi
+        have=$(dcmdump -q +P 0008,0018 +P 0028,0010 +P 0028,0011 +P 7fe0,0010 \
+                   "${OUTPUT_DIR}/${mod}/${file}" 2>/dev/null \
+               | awk '$1 == "(7fe0,0010)" { print $1; next } { print $1, $3 }') || return 1
+        [ "${have}" = "${want}" ] || return 1
+    done
+}
+
+if existing_output_is_current; then
+    echo "[generate-test-data] Test data already exists in ${OUTPUT_DIR} for the current settings, skipping."
     exit 0
+fi
+if [ -n "$(find "${OUTPUT_DIR}/ct" "${OUTPUT_DIR}/mr" "${OUTPUT_DIR}/cr" -name '*.dcm' -print -quit 2>/dev/null)" ]; then
+    echo "[generate-test-data] Existing test data in ${OUTPUT_DIR} is incomplete or was made with other settings; writing it again."
 fi
 
 mkdir -p "${OUTPUT_DIR}/ct" "${OUTPUT_DIR}/mr" "${OUTPUT_DIR}/cr"
@@ -480,7 +515,7 @@ for i in $(seq 1 "${MANIFEST_CR_COUNT}"); do
 done
 
 # ── Summary ──────────────────────────────────────────
-TOTAL=$(find "${OUTPUT_DIR}" -name "*.dcm" | wc -l)
+TOTAL=$(find "${OUTPUT_DIR}/ct" "${OUTPUT_DIR}/mr" "${OUTPUT_DIR}/cr" -name "*.dcm" | wc -l)
 echo "[generate-test-data] Generation complete: ${TOTAL} DICOM files"
 echo "[generate-test-data] CT: $(find "${OUTPUT_DIR}/ct" -name "*.dcm" | wc -l) files"
 echo "[generate-test-data] MR: $(find "${OUTPUT_DIR}/mr" -name "*.dcm" | wc -l) files"

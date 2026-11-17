@@ -38,8 +38,9 @@ Optional (for host-side DICOM operations):
 ### First-Time Setup
 
 ```bash
-# Clone or navigate to the project
-cd dcmtk_docker
+# Clone the project and enter its folder
+git clone https://github.com/kcenon/dcmtk-docker.git
+cd dcmtk-docker
 
 # Start all services (auto-creates .env from env.default if needed)
 ./pacs.sh up
@@ -370,20 +371,24 @@ Default `OID_ROOT`: `1.2.826.0.1.3680043.8.499`
 
 ### Adding Custom DICOM Files
 
-Place DICOM files in the `data/` directory. They will be available in the test-client
-at `/dicom/testdata/`.
+Place DICOM files in a folder of your own under `data/`, for example
+`data/custom/`. The test-client sees `data/` at `/dicom/testdata/`. Keep them
+out of the generated `ct/`, `mr/` and `cr/` folders, and store only your folder:
+`storescu +sd` stops at the first file that is not DICOM, such as the
+`data/dicom-templates/*.dump` sources.
 
 ```bash
-# Copy files to data directory on host
-cp /path/to/your/files/*.dcm data/
+# Copy files to a folder of your own on the host
+mkdir -p data/custom
+cp /path/to/your/files/*.dcm data/custom/
 
 # Files are immediately available in test-client
-docker compose exec test-client ls /dicom/testdata/
+docker compose exec test-client ls /dicom/testdata/custom/
 
 # Store them into the PACS
 docker compose exec test-client \
     storescu -v -aet TEST_SCU -aec DCMTK_PACS \
-    +sd +r pacs-server 11112 /dicom/testdata/
+    +sd +r pacs-server 11112 /dicom/testdata/custom/
 ```
 
 ### Creating Custom Test Data
@@ -429,6 +434,12 @@ rm -rf data/ct data/mr data/cr
 # Restart test-client to regenerate
 docker compose restart test-client
 ```
+
+Only the generated `ct/`, `mr/` and `cr/` folders matter here: your own files
+elsewhere under `data/` stay as they are and do not stop the regeneration.
+The generator also writes these folders again by itself when the containers
+are recreated with another `GENERATE_PIXEL_DATA`, PixelData size or
+`OID_ROOT`, for example by `docker compose up -d` after editing `.env`.
 
 ---
 
@@ -518,21 +529,28 @@ wait
 # Example GitHub Actions step
 - name: Run PACS integration tests
   run: |
-    cd dcmtk_docker
+    git clone https://github.com/kcenon/dcmtk-docker.git
+    cd dcmtk-docker
     ./pacs.sh up
     ./pacs.sh test
     ./pacs.sh clean
 ```
 
-Or using `docker compose` directly (no `.env` copy needed because every
-variable in `docker-compose.yml` has a `${VAR:-default}` fallback):
+Or start the stack with `docker compose` directly (no `.env` copy needed
+because every variable in `docker-compose.yml` has a `${VAR:-default}`
+fallback). `--wait` returns once every service is healthy, including the
+test-client after it has generated its data. Run the suites through
+`./pacs.sh test`, not `docker compose exec -T test-client /tests/test-all.sh`:
+the primary PACS indexes the synthetic studies when it starts, and the C-STORE
+suite needs both PACS nodes empty, which `./pacs.sh test` arranges first.
 
 ```yaml
 - name: Run PACS integration tests
   run: |
-    cd dcmtk_docker
-    docker compose up -d --build
-    docker compose exec -T test-client /tests/test-all.sh
+    git clone https://github.com/kcenon/dcmtk-docker.git
+    cd dcmtk-docker
+    docker compose up -d --build --wait
+    ./pacs.sh test
     docker compose down -v
 ```
 
@@ -643,20 +661,33 @@ C-MOVE can route to it.
 #### Connecting Orthanc
 
 [Orthanc](https://www.orthanc-server.com/) is a lightweight DICOM server with a
-REST API. To test interoperability:
+REST API. To test interoperability, attach it to this environment's network.
+Compose prefixes the network name with the project name, which defaults to
+the folder name, so a default clone in `dcmtk-docker` uses
+`dcmtk-docker_dicom-net`; `docker network ls` shows the name for another
+folder or `COMPOSE_PROJECT_NAME`.
+
+The `jodogne/orthanc` image takes its settings from its built-in
+`/etc/orthanc/orthanc.json`, not from environment variables: AET `ORTHANC`,
+DICOM port 4242 and REST user `orthanc` with password `orthanc`, which
+`curl -u orthanc` asks for. It accepts C-STORE from any AE but answers C-FIND
+only from AEs it knows, so the example registers `TEST_SCU` first.
 
 ```bash
 # Start Orthanc alongside this environment
 docker run -d --name orthanc \
-    --network dcmtk_docker_dicom-net \
+    --network dcmtk-docker_dicom-net \
     -p 8042:8042 -p 4242:4242 \
-    -e ORTHANC__DICOM_AET=ORTHANC \
-    -e ORTHANC__DICOM_PORT=4242 \
     jodogne/orthanc
 
 # Store from this PACS to Orthanc
 docker compose exec test-client \
-    storescu -v -aet TEST_SCU -aec ORTHANC orthanc 4242 /dicom/testdata/ct/
+    storescu -v +sd -aet TEST_SCU -aec ORTHANC orthanc 4242 /dicom/testdata/ct/
+
+# Let TEST_SCU query Orthanc (Port is used only if Orthanc connects back).
+# With only a user name, curl asks for the password.
+curl -u orthanc -X PUT http://localhost:8042/modalities/TEST_SCU \
+    -d '{"AET": "TEST_SCU", "Host": "test-client", "Port": 104}'
 
 # Query Orthanc via C-FIND
 docker compose exec test-client \
@@ -664,7 +695,7 @@ docker compose exec test-client \
     -k QueryRetrieveLevel=STUDY -k PatientName="*" -k StudyInstanceUID
 
 # Verify via Orthanc REST API
-curl http://localhost:8042/studies
+curl -u orthanc http://localhost:8042/studies
 ```
 
 #### Connecting dcm4chee-arc
@@ -724,18 +755,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: kcenon/dcmtk-docker
+          path: dcmtk-docker
 
       - name: Start PACS environment
-        working-directory: dcmtk_docker
+        working-directory: dcmtk-docker
         run: ./pacs.sh up
 
       - name: Run DICOM tests
-        working-directory: dcmtk_docker
+        working-directory: dcmtk-docker
         run: ./pacs.sh test
 
       - name: Collect logs on failure
         if: failure()
-        working-directory: dcmtk_docker
+        working-directory: dcmtk-docker
         run: |
           docker compose logs > pacs-logs.txt
           ./pacs.sh status
@@ -745,11 +779,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pacs-logs
-          path: dcmtk_docker/pacs-logs.txt
+          path: dcmtk-docker/pacs-logs.txt
 
       - name: Cleanup
         if: always()
-        working-directory: dcmtk_docker
+        working-directory: dcmtk-docker
         run: ./pacs.sh clean
 ```
 
@@ -764,12 +798,16 @@ pacs-integration:
   variables:
     DOCKER_HOST: tcp://docker:2376
     DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    # docker:24 is Alpine-based and has no bash, which pacs.sh needs
+    - apk add --no-cache bash
   script:
-    - cd dcmtk_docker
+    - git clone https://github.com/kcenon/dcmtk-docker.git
+    - cd dcmtk-docker
     - ./pacs.sh up
     - ./pacs.sh test
   after_script:
-    - cd dcmtk_docker && ./pacs.sh clean
+    - cd dcmtk-docker && ./pacs.sh clean
 ```
 
 ---

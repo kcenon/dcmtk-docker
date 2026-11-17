@@ -344,6 +344,13 @@ jobs:
           docker compose exec -T test-client /tests/test-find.sh
           docker compose exec -T test-client /tests/test-move.sh
 
+      - name: Reuse or rewrite generated data by settings (#138)
+        if: needs.changes.outputs.runtime == 'true'
+        # Runs the image's generator against scratch folders: only its own
+        # ct/, mr/ and cr/ output counts, and output that is incomplete or was
+        # made with other settings is written again.
+        run: docker compose exec -T test-client /tests/test-generator-reuse.sh
+
       - name: Dump logs on failure
         if: needs.changes.outputs.runtime == 'true' && (failure())
         run: |

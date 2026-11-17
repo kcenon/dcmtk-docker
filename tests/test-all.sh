@@ -5,7 +5,13 @@ set -uo pipefail
 # Executes all test scripts in sequence and reports aggregated results.
 #
 # Usage:
-#   docker compose exec test-client /tests/test-all.sh [--verbose]
+#   ./pacs.sh test [--verbose]
+#
+# Run it through pacs.sh: test-store.sh needs both PACS nodes empty, and
+# `pacs.sh test` wipes their storage first. The primary PACS indexes the
+# synthetic studies when it starts, so a direct
+# `docker compose exec -T test-client /tests/test-all.sh` on a fresh stack
+# stops in test-store.sh unless the storage was wiped the same way.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
