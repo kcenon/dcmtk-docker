@@ -47,8 +47,20 @@ what the changelog describes.
    ```
    If `git diff` reports a difference, do not push: a change reached
    `develop` after the promotion and would be lost. The `develop` protection
-   forbids force pushes, so only an admin can run the push (`enforce_admins`
-   is false). Record the old `develop` SHA in the promotion pull request;
+   forbids force pushes for everyone, admins included (`enforce_admins` does
+   not lift that rule), so an admin allows them for this push only:
+   1. Save the output of
+      `gh api repos/kcenon/dcmtk-docker/branches/develop/protection`.
+   2. In Settings > Branches, edit the `develop` rule and turn on "Allow
+      force pushes". If "Specify who can force push" is offered, allow only
+      the admin.
+   3. Run the push above. GitHub reports the force push and the missing
+      `GitGuardian Security Checks` result (that check runs only on pull
+      requests) as bypassed rule violations.
+   4. Turn "Allow force pushes" off again, and compare the protection with
+      the saved output.
+
+   Record the old `develop` SHA in the promotion pull request;
    after the push it is the only reference to the old history. Rebase open
    pull requests against `develop` onto the new branch. The push run of Test
    Isolation runs every suite, because its base is no longer in the fetched
@@ -67,9 +79,9 @@ what the changelog describes.
 > **Protection status:** `main` is protected (enabled 2026-05-31, issue #82).
 > A pull request is required before merging (0 required approvals, so a solo
 > maintainer is not locked out), and force-pushes and branch deletion are
-> forbidden. Protection is intentionally not enforced against admins
-> (`enforce_admins: false`, mirroring `develop`), so the owner retains an
-> emergency-merge path.
+> forbidden for everyone, admins included. The other rules are intentionally
+> not enforced against admins (`enforce_admins: false`, mirroring `develop`),
+> so the owner retains an emergency-merge path.
 >
 > **Required checks (#135):** `develop` and `main` require the same status
 > checks, and a pull request must be up to date before merge (`strict`). They
