@@ -46,13 +46,22 @@ what the changelog describes.
 
 > **Protection status:** `main` is protected (enabled 2026-05-31, issue #82).
 > A pull request is required before merging (0 required approvals, so a solo
-> maintainer is not locked out), force-pushes and branch deletion are forbidden,
-> and the full CI matrix is required and must be up to date before merge
-> (`strict`): the twelve isolation/aggregator/security checks that the
-> `develop`→`main` promotion runs (see #81). Protection is intentionally not
-> enforced against admins (`enforce_admins: false`, mirroring `develop`), so the
-> owner retains an emergency-merge path. Inspect the live rules with
-> `gh api repos/kcenon/dcmtk-docker/branches/main/protection`.
+> maintainer is not locked out), and force-pushes and branch deletion are
+> forbidden. Protection is intentionally not enforced against admins
+> (`enforce_admins: false`, mirroring `develop`), so the owner retains an
+> emergency-merge path.
+>
+> **Required checks (#135):** `develop` and `main` require the same status
+> checks, and a pull request must be up to date before merge (`strict`). They
+> are all checks that the Test Isolation and Host tests workflows report, plus
+> `GitGuardian Security Checks`. `README lint`
+> (Documentation Audit) is not required: it runs only when its paths change,
+> and a required check that never reports blocks the merge. Keep both
+> protections in step with those two workflows. A new job is not enforced until
+> its check is added, and a renamed or removed job blocks every merge until its
+> old name is removed. Inspect the live rules with
+> `gh api repos/kcenon/dcmtk-docker/branches/<branch>/protection` and compare
+> `required_status_checks` with `gh pr checks` on a recent pull request.
 
 ## Verifying after a release
 
@@ -65,8 +74,9 @@ Unknown paths conservatively run the runtime tests; manual dispatch runs them
 all, and so does a push whose previous commit is not in the fetched history,
 such as a branch moved to a commit that does not descend from its old tip.
 Runtime changes, including `pacs.sh`, `env.default`, `patches/`, and Compose
-files, run the usual suites. Required check names and branch protections remain
-unchanged. This avoids the missing-context block on release metadata PRs (#108).
+files, run the usual suites. The check names do not depend on the changed
+paths, so all of them can be required without blocking release metadata PRs
+(#108).
 
 The classifier's host tests cover documentation, runtime, workflow and mixed
 changes, renames, divergent PR bases, push bases missing from the fetched
