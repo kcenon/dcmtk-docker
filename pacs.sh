@@ -63,6 +63,45 @@ service_container_id() {
     ${DC} ps -q "${service}" 2>/dev/null | head -n1
 }
 
+# Make later compose calls use the files the existing stack was started with.
+# pacs.sh passes no -f, so without this a recreated service is built from
+# docker-compose.yml alone and loses overlays such as TLS or the restricted
+# profile (#136). Compose records the files, comma-separated, in a label on
+# each container; COMPOSE_PATH_SEPARATOR="," lets COMPOSE_FILE take that list
+# as it is. Without containers, Compose resolves the files itself.
+use_stack_compose_files() {
+    local ids id files stack_files="" file
+    local -a list
+    ids=$(${DC} ps -a -q)
+    for id in ${ids}; do
+        files=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "${id}")
+        if [ -z "${files}" ]; then
+            err "Cannot tell which compose files started container ${id}; run ./pacs.sh down first"
+            exit 1
+        fi
+        if [ -z "${stack_files}" ]; then
+            stack_files="${files}"
+        elif [ "${files}" != "${stack_files}" ]; then
+            err "Containers of this stack were started with different compose files:"
+            err "  ${stack_files}"
+            err "  ${files}"
+            err "Run ./pacs.sh down, then start the stack with the overlays you want"
+            exit 1
+        fi
+    done
+    [ -n "${stack_files}" ] || return 0
+    IFS=, read -r -a list <<<"${stack_files}"
+    for file in "${list[@]}"; do
+        if [ ! -f "${file}" ]; then
+            err "Compose file of the existing stack not found: ${file}; run ./pacs.sh down first"
+            exit 1
+        fi
+    done
+    export COMPOSE_PATH_SEPARATOR=,
+    export COMPOSE_FILE="${stack_files}"
+    info "Keeping the compose files of the existing stack: ${stack_files}"
+}
+
 read_env_value() {
     local key="$1"
     local default="$2"
@@ -228,6 +267,7 @@ print_status_table() {
 # ── Commands ─────────────────────────────────────
 cmd_up() {
     ensure_env
+    use_stack_compose_files
     info "Building and starting all services..."
     ${DC} up -d --build
 
@@ -405,6 +445,7 @@ cmd_shell() {
 
 cmd_reset() {
     warn "This will stop all services and wipe Docker volumes"
+    use_stack_compose_files
     info "Stopping services..."
     ${DC} down -v
 
@@ -612,6 +653,8 @@ cmd_add_peer() {
     case "${ae}"   in ""|*[!A-Za-z0-9_]*) err "Invalid AE title '${ae}' (letters, digits, underscore only)"; exit 1 ;; esac
     case "${host}" in ""|*[!A-Za-z0-9.-]*) err "Invalid host '${host}'"; exit 1 ;; esac
     case "${port}" in ""|*[!0-9]*) err "Invalid port '${port}' (must be numeric)"; exit 1 ;; esac
+    # Before .env changes, so a refusal leaves it untouched.
+    use_stack_compose_files
     local entry="${name}=${ae}:${host}:${port}"
     local current newval
     current=$(read_env_value "EXTRA_PEERS" "")

@@ -152,9 +152,11 @@ docker compose down
 docker compose up -d
 ```
 
-`./pacs.sh up` continues to launch the default `test` mode unchanged;
-restricted mode is purely an opt-in compose override (see
-`docker-compose.restricted.yml`).
+Restricted mode is an opt-in compose override (see
+`docker-compose.restricted.yml`). A fresh `./pacs.sh up` launches the default
+`test` mode unless `COMPOSE_FILE` names the overlay. While restricted
+containers exist, `./pacs.sh up`, `reset` and `add-peer` keep the restricted
+overlay; see [Overlays and `pacs.sh`](05_usage_guide.md#overlays-and-pacssh).
 
 The [independent TLS test](08_test_suite.md#independent-tls-runtime-check)
 validates the image's certificate generator and OpenSSL/DCMTK transport
