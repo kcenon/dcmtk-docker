@@ -33,6 +33,26 @@ what the changelog describes.
    git push origin vX.Y.Z
    ```
    `git describe` and downstream pins now resolve to `vX.Y.Z`.
+7. **Re-create `develop` from `main`**: the squash merge in step 5 gives
+   `main` a commit that `develop` does not have. If `develop` keeps its old
+   history, the next promotion pull request conflicts wherever a later change
+   edits lines that this release changed (#130 met 27 conflicting files).
+   Right after the tag, before anything else merges into `develop`, point
+   `develop` at the new `main` commit:
+   ```bash
+   git fetch origin
+   git diff --quiet origin/main origin/develop   # must exit 0
+   git push --force-with-lease=develop:<old develop SHA> origin \
+       origin/main:refs/heads/develop
+   ```
+   If `git diff` reports a difference, do not push: a change reached
+   `develop` after the promotion and would be lost. The `develop` protection
+   forbids force pushes, so only an admin can run the push (`enforce_admins`
+   is false). Record the old `develop` SHA in the promotion pull request;
+   after the push it is the only reference to the old history. Rebase open
+   pull requests against `develop` onto the new branch. The push run of Test
+   Isolation runs every suite, because its base is no longer in the fetched
+   history (#134).
 
 ## Invariants
 
@@ -88,4 +108,5 @@ results on a pull request before merging.
 git show main:VERSION          # the new X.Y.Z
 git describe --tags            # vX.Y.Z
 git show main:LICENSE | head   # present
+git rev-parse origin/main origin/develop   # the same SHA after step 7
 ```
