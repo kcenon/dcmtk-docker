@@ -69,7 +69,6 @@ docker compose exec test-client \
     -k PatientID \
     -k StudyDate \
     -k StudyDescription \
-    -k ModalitiesInStudy \
     -k StudyInstanceUID
 
 # Find studies for a specific patient

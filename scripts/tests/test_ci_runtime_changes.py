@@ -68,11 +68,36 @@ class RuntimeChangesTests(unittest.TestCase):
         self.assertEqual(self.classify("0" * 40, self.base, "push").stdout, "runtime=true\n")
         self.assertEqual(self.classify("", "", "workflow_dispatch").stdout, "runtime=true\n")
 
+    def test_push_from_missing_base_runs_every_suite(self):
+        # develop re-created from main: the old tip is in no fetched ref (#134).
+        old_tip = self.commit("Dockerfile", "old tip")
+        self.git("reset", "-q", "--hard", self.base)
+        self.git("reflog", "expire", "--expire=now", "--all")
+        self.git("gc", "-q", "--prune=now")
+        self.assertNotEqual(subprocess.run(["git", "cat-file", "-e", old_tip + "^{commit}"],
+                                           cwd=self.repo, capture_output=True).returncode, 0)
+        recreated = self.commit("README.md", "re-created")  # docs only versus its parent
+        tree = self.git("rev-parse", recreated + "^{tree}")
+        self.assertEqual(self.classify(self.base, recreated, "push").stdout, "runtime=false\n")
+        for base in [old_tip, "f" * 40, "f" * 64, tree]:
+            with self.subTest(base=base):
+                result = self.classify(base, recreated, "push")
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "runtime=true\n")
+        result = self.classify(old_tip, recreated)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
     def test_invalid_or_missing_commits_fail_without_skip_output(self):
-        for base in ["", "not-a-sha", "f" * 40]:
-            result = self.classify(base, self.base)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, "")
+        cases = [(base, self.base, "pull_request") for base in ["", "not-a-sha", "f" * 40]]
+        # A push tolerates only a missing base; malformed SHAs and a missing head still fail.
+        cases += [(base, self.base, "push") for base in ["", "not-a-sha", self.base[:12]]]
+        cases.append((self.base, "f" * 40, "push"))
+        for base, head, event in cases:
+            with self.subTest(base=base, head=head, event=event):
+                result = self.classify(base, head, event)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

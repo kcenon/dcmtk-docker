@@ -19,7 +19,7 @@ print_header "PixelData Smoke Test"
 
 # ── Skip path: feature is opt-in ──────────────────────
 if [ "${GENERATE_PIXEL_DATA}" != "true" ]; then
-    print_skip "PixelData: GENERATE_PIXEL_DATA is not 'true' (skipping smoke test)"
+    print_skip "PixelData: GENERATE_PIXEL_DATA is not 'true' in the test-client environment (skipping smoke test)"
     print_summary "PixelData"
     exit 0
 fi
@@ -328,11 +328,96 @@ assert_ct_rescale() {
     return 1
 }
 
+# ── Helper: assert CT bands display at the intended HU (#137) ─
+# The tag check above cannot tell whether the stored values and the Rescale
+# tags agree: a viewer displays HU = stored value x RescaleSlope +
+# RescaleIntercept. This applies the file's own tags to the first row (every
+# row repeats the band pattern) and compares the band sequence, then checks
+# the minimum and maximum reported by DCMTK's modality transform, which also
+# honours PixelRepresentation and BitsStored.
+# Args: LABEL FILE COLS
+assert_ct_hu_values() {
+    local label="$1"
+    local file="$2"
+    local cols="$3"
+
+    local -a exp_bands
+    read -r -a exp_bands <<<"${CT_EXPECTED_HU_BANDS}"
+    local exp_min="${exp_bands[0]}"
+    local exp_max="${exp_bands[${#exp_bands[@]}-1]}"
+
+    if [ "${cols}" -lt "${#exp_bands[@]}" ]; then
+        print_skip "PixelData: ${label} has ${cols} columns, fewer than the ${#exp_bands[@]} HU bands; skipping HU check"
+        return 0
+    fi
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local dump
+    dump=$(dcmdump "${file}" 2>/dev/null) || {
+        print_fail "PixelData: ${label} dcmdump failed (${file})"
+        TEST_FAILED=$((TEST_FAILED + 1))
+        return 1
+    }
+
+    local slope intercept pix_rep
+    slope=$(grep     -m1 '(0028,1053) DS' <<<"${dump}" | sed -nE 's/.*\[([^]]*)\].*/\1/p' | sed 's/[[:space:]]*$//')
+    intercept=$(grep -m1 '(0028,1052) DS' <<<"${dump}" | sed -nE 's/.*\[([^]]*)\].*/\1/p' | sed 's/[[:space:]]*$//')
+    pix_rep=$(grep   -m1 '(0028,0103) US' <<<"${dump}" | sed -nE 's/.*US[[:space:]]+([0-9]+).*/\1/p')
+
+    local errors=()
+    if [ -z "${slope}" ] || [ -z "${intercept}" ]; then
+        errors+=("Rescale tags missing (slope=${slope:-<empty>} intercept=${intercept:-<empty>})")
+    else
+        # Read the samples as the file declares them: signed when
+        # PixelRepresentation is 1, unsigned otherwise.
+        local od_type=u2
+        [ "${pix_rep}" = "1" ] && od_type=d2
+
+        # dcmdump +W writes PixelData to <dir>/<file name>.0.raw, little endian.
+        local raw_dir raw_file="" got_bands=""
+        raw_dir=$(mktemp -d)
+        if dcmdump +W "${raw_dir}" "${file}" >/dev/null 2>&1; then
+            raw_file=$(find "${raw_dir}" -name '*.raw' | head -1)
+        fi
+        if [ -n "${raw_file}" ]; then
+            got_bands=$(od -An -v -w2 --endian=little -t"${od_type}" -N $((cols * 2)) "${raw_file}" \
+                | awk -v m="${slope}" -v b="${intercept}" '
+                    { hu = sprintf("%g", $1 * m + b)
+                      if (NR == 1 || hu != prev) { out = out (NR == 1 ? "" : " ") hu; prev = hu } }
+                    END { print out }')
+        fi
+        rm -rf "${raw_dir}"
+
+        [ "${got_bands}" = "${CT_EXPECTED_HU_BANDS}" ] \
+            || errors+=("first-row HU bands expected=[${CT_EXPECTED_HU_BANDS}] got=[${got_bands:-<empty>}]")
+    fi
+
+    local info got_min got_max
+    info=$(dcm2pnm -v --image-info --no-output "${file}" 2>&1)
+    got_min=$(grep -m1 'minimum pixel value' <<<"${info}" | sed -nE 's/.*:[[:space:]]*(-?[0-9.]+)[[:space:]]*$/\1/p')
+    got_max=$(grep -m1 'maximum pixel value' <<<"${info}" | sed -nE 's/.*:[[:space:]]*(-?[0-9.]+)[[:space:]]*$/\1/p')
+    [ "${got_min}" = "${exp_min}" ] || errors+=("DCMTK minimum HU expected=${exp_min} got=${got_min:-<empty>}")
+    [ "${got_max}" = "${exp_max}" ] || errors+=("DCMTK maximum HU expected=${exp_max} got=${got_max:-<empty>}")
+
+    if [ "${#errors[@]}" -eq 0 ]; then
+        print_pass "PixelData: ${label} CT bands display as HU [${got_bands}] (DCMTK min=${got_min} max=${got_max})"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "PixelData: ${label} CT HU mismatch: $(IFS=' | '; echo "${errors[*]}")"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
 # ── Per-modality expected-value table ─────────────────
 # Single source of truth for attribute values. Mirrors the per-modality
 # matrix in scripts/generate-test-data.sh:
 #   #12 (CT signed/Rescale)  -> CT pix_rep=1; Rescale tags asserted via
 #                                 assert_ct_rescale below.
+#   #137 (CT displayed HU)   -> stored values x Rescale must give the bands in
+#                                 CT_EXPECTED_HU_BANDS (assert_ct_hu_values).
 #   #13 (modality-realistic) -> distinct rows/cols/bits_stored per modality:
 #                                 CT 128x128 BitsStored=16, MR 128x128
 #                                 BitsStored=12, CR 224x224 BitsStored=14
@@ -347,6 +432,10 @@ declare -A PIXEL_EXPECTED=(
     [mr]="${MR_PIXEL_ROWS} ${MR_PIXEL_COLS} 12 0 MONOCHROME2"
     [cr]="${CR_PIXEL_ROWS} ${CR_PIXEL_COLS} 14 0 MONOCHROME2"
 )
+
+# Displayed HU of the CT bands, left to right. Mirrors hu_values in
+# generate_ct_buffer (scripts/generate-test-data.sh).
+CT_EXPECTED_HU_BANDS="-1000 -100 40 60 100 600 1000"
 
 # ── Tests ─────────────────────────────────────────────
 for modality in ct mr cr; do
@@ -372,9 +461,11 @@ for modality in ct mr cr; do
         assert_file_valid         "${label}" "${sample}" || true
         assert_dcm2pnm_dimensions "${label}" "${sample}" "${exp_rows}" "${exp_cols}" || true
 
-        # CT-only: verify the Rescale tags required by PS3.3 C.8.2.1.
+        # CT-only: verify the Rescale tags required by PS3.3 C.8.2.1 and the
+        # HU values they produce.
         if [ "${modality}" = "ct" ]; then
-            assert_ct_rescale "${label}" "${sample}" "-1024" "1.0" "HU" || true
+            assert_ct_rescale   "${label}" "${sample}" "0" "1.0" "HU" || true
+            assert_ct_hu_values "${label}" "${sample}" "${exp_cols}" || true
         fi
 
         # Opt-in slow-path range assertion. Range stays wide (full uint16) until

@@ -1,6 +1,6 @@
 # DCMTK PACS Test Environment
 
-**Status: active** | **Latest release:** [v0.2.0](https://github.com/kcenon/dcmtk-docker/releases/tag/v0.2.0) ([changelog](CHANGELOG.md))
+**Status: active** | **Latest release:** [v0.3.0](https://github.com/kcenon/dcmtk-docker/releases/tag/v0.3.0) ([changelog](CHANGELOG.md))
 
 A Docker-based PACS integration test environment using DCMTK.
 `./pacs.sh up` starts two query/retrieve PACS servers, a C-STORE receiver, a
@@ -20,7 +20,7 @@ tools on one Docker network.
 ./pacs.sh status
 ```
 
-`./pacs.sh test` runs `tests/test-all.sh`: the C-ECHO, C-STORE, C-FIND, C-MOVE,
+`./pacs.sh test` runs `tests/test-all.sh`: the C-ECHO, C-STORE, C-FIND, C-MOVE, C-GET,
 Modality Worklist, ad-hoc peer, transfer-syntax, and load-smoke suites. The
 PixelData, ad-hoc C-MOVE delivery, and TLS suites skip unless their settings
 are enabled.
@@ -50,7 +50,7 @@ Host Machine
 │  │ AE:DCMTK_PACS│  │ AE:DCMTK_PAC2│  │ AE:STORE_SCP  │   │
 │  │ :11112       │  │ :11112       │  │ :11112        │   │
 │  └──────┬───────┘  └──────────────┘  └───────────────┘   │
-│         │ C-ECHO/STORE/FIND/MOVE                         │
+│         │ C-ECHO/STORE/FIND/MOVE/GET                     │
 │  ┌──────┴───────┐                    ┌───────────────┐   │
 │  │ test-client  │  C-FIND (MWL)      │ mwl-server    │   │
 │  │ (SCU tools)  ├───────────────────>│ (wlmscpfs)    │   │
@@ -65,7 +65,7 @@ Host Machine
 
 | Service | AE Title | Host Port | Role | Process |
 |---------|----------|-----------|------|---------|
-| pacs-server | `DCMTK_PACS` | 11112 | Primary PACS (C-ECHO, C-STORE, C-FIND, C-MOVE) | `dcmqrscp` |
+| pacs-server | `DCMTK_PACS` | 11112 | Primary PACS (C-ECHO, C-STORE, C-FIND, C-MOVE, C-GET) | `dcmqrscp` |
 | pacs-server-2 | `DCMTK_PAC2` | 11113 | Secondary PACS for multi-PACS testing | `dcmqrscp` |
 | storescp-receiver | `STORE_SCP` | 11114 | C-MOVE destination / standalone receiver | `storescp` |
 | mwl-server | `DCMTK_WLM` | 11115 | Modality Worklist SCP (`findscu -W`) | `wlmscpfs` |
@@ -115,7 +115,7 @@ A unified CLI script wraps all common operations:
 | `./pacs.sh up` | Auto-setup `.env`, build & start all services, wait for health |
 | `./pacs.sh down` | Stop all services |
 | `./pacs.sh status` | Show service health, ports, and AE titles |
-| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `pixeldata`, `transfer-syntax`, `load-smoke`, `concurrent-store`, `worklist`, `adhoc-peers`) |
+| `./pacs.sh test [suite]` | Run tests (`all`, `echo`, `store`, `find`, `move`, `get`, `pixeldata`, `transfer-syntax`, `load-smoke`, `concurrent-store`, `worklist`, `adhoc-peers`) |
 | `./pacs.sh add-peer <name> <ae> <host> <port>` | Register an ad-hoc C-MOVE destination and restart the PACS |
 | `./pacs.sh logs [service]` | Tail logs (all or specific service) |
 | `./pacs.sh shell` | Interactive bash into test-client container |
@@ -157,6 +157,7 @@ hardening, the bind address, and the restricted profile.
 
 | Page | Contents |
 |------|----------|
+| [Usage guide](docs/05_usage_guide.md) | Setup, CLI reference, operation examples, and troubleshooting |
 | [DICOM operations](docs/07_dicom_operations.md) | Start and stop; C-ECHO, C-STORE, C-FIND, and C-MOVE examples; external applications |
 | [Test suite and test data](docs/08_test_suite.md) | Suites, transfer syntaxes, load smoke, fixtures, synthetic PixelData |
 | [Configuration](docs/09_configuration.md) | Environment variables and defaults; `dcmqrscp` templates |
@@ -168,10 +169,9 @@ hardening, the bind address, and the restricted profile.
 
 Earlier design documents: [DCMTK and DICOM research](docs/01_research_dcmtk_dicom.md),
 [Docker approaches](docs/02_research_docker_approaches.md),
-[architecture design](docs/03_architecture_design.md),
-[work plan](docs/04_work_plan.md), and the
-[usage guide](docs/05_usage_guide.md), whose status example and variable list
-predate `mwl-server`. Where they differ, this README and the pages above apply.
+[architecture design](docs/03_architecture_design.md), and
+[work plan](docs/04_work_plan.md). Where they differ, this README and the
+pages above apply.
 
 ## License
 

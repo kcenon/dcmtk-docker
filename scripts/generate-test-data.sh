@@ -47,10 +47,45 @@ if [ -n "${PIXEL_DATA_ROWS:-}" ] || [ -n "${PIXEL_DATA_COLS:-}" ]; then
     echo "[generate-test-data]          Use {CT,MR,CR}_PIXEL_ROWS / _COLS or PIXEL_DATA_PROFILE instead." >&2
 fi
 
-# Skip if test data already exists
-if [ -d "${OUTPUT_DIR}" ] && [ "$(find "${OUTPUT_DIR}" -name '*.dcm' 2>/dev/null | wc -l)" -gt 0 ]; then
-    echo "[generate-test-data] Test data already exists in ${OUTPUT_DIR}, skipping."
+# Reuse existing output only when it is this generator's own, complete output
+# for the current settings (#138). Only ct/, mr/ and cr/ count, so a user's
+# own DICOM files elsewhere under OUTPUT_DIR do not stop generation. Each
+# folder must hold at least the manifest's instance count, and its first
+# instance must carry the SOP Instance UID (OID_ROOT) and the PixelData state
+# (absent, or present with the configured Rows and Columns) that the current
+# settings produce. Otherwise a settings change, such as GENERATE_PIXEL_DATA=true
+# after a default run, would keep the old files: `docker compose down -v` does
+# not remove the bind-mounted ./data. The check reads the files themselves
+# because a marker file in these folders would break `storescu +sd` scans.
+existing_output_is_current() {
+    local mod count file uid rows cols want have
+    for mod in ct mr cr; do
+        case "${mod}" in
+            ct) count="${MANIFEST_CT_COUNT}"; file="ct_pat001_1.dcm"
+                uid="${MANIFEST_CT_SERIES_UID}.1"; rows="${CT_PIXEL_ROWS}"; cols="${CT_PIXEL_COLS}" ;;
+            mr) count="${MANIFEST_MR_COUNT}"; file="mr_pat002_s1_1.dcm"
+                uid="${MANIFEST_MR_T1_SERIES_UID}.1"; rows="${MR_PIXEL_ROWS}"; cols="${MR_PIXEL_COLS}" ;;
+            cr) count="${MANIFEST_CR_COUNT}"; file="cr_pat003_1.dcm"
+                uid="${MANIFEST_CR_SERIES_UID}.1"; rows="${CR_PIXEL_ROWS}"; cols="${CR_PIXEL_COLS}" ;;
+        esac
+        [ "$(find "${OUTPUT_DIR}/${mod}" -maxdepth 1 -name '*.dcm' 2>/dev/null | wc -l)" -ge "${count}" ] || return 1
+        want="(0008,0018) [${uid}]"
+        if [ "${GENERATE_PIXEL_DATA}" = "true" ]; then
+            want+=$'\n'"(0028,0010) ${rows}"$'\n'"(0028,0011) ${cols}"$'\n'"(7fe0,0010)"
+        fi
+        have=$(dcmdump -q +P 0008,0018 +P 0028,0010 +P 0028,0011 +P 7fe0,0010 \
+                   "${OUTPUT_DIR}/${mod}/${file}" 2>/dev/null \
+               | awk '$1 == "(7fe0,0010)" { print $1; next } { print $1, $3 }') || return 1
+        [ "${have}" = "${want}" ] || return 1
+    done
+}
+
+if existing_output_is_current; then
+    echo "[generate-test-data] Test data already exists in ${OUTPUT_DIR} for the current settings, skipping."
     exit 0
+fi
+if [ -n "$(find "${OUTPUT_DIR}/ct" "${OUTPUT_DIR}/mr" "${OUTPUT_DIR}/cr" -name '*.dcm' -print -quit 2>/dev/null)" ]; then
+    echo "[generate-test-data] Existing test data in ${OUTPUT_DIR} is incomplete or was made with other settings; writing it again."
 fi
 
 mkdir -p "${OUTPUT_DIR}/ct" "${OUTPUT_DIR}/mr" "${OUTPUT_DIR}/cr"
@@ -122,6 +157,7 @@ encode_i16_le_hex() {
 # Pattern: air(-1000) -> fat(-100) -> soft(40) -> muscle(60) -> liver(100)
 #          -> contrast(600) -> bone(1000). One-band-per-column-range, identical
 # row-to-row, so the row sequence is built once and repeated.
+# The stored values are the HU values themselves (identity Rescale, see below).
 generate_ct_buffer() {
     local rows="$1" cols="$2" outfile="$3"
     local hu_values=(-1000 -100 40 60 100 600 1000)
@@ -318,8 +354,11 @@ DUMP
                 rows="${CT_PIXEL_ROWS}"; cols="${CT_PIXEL_COLS}"
                 bits_stored=16; high_bit=15; pix_rep=1
                 # CT (PS3.3 C.8.2.1): Rescale tags map stored values to HU,
-                # plus a soft-tissue display window (W/L 400/40).
-                extras=$'\n(0028,1052) DS [-1024]\n(0028,1053) DS [1.0]\n(0028,1054) LO [HU]\n(0028,1050) DS [40]\n(0028,1051) DS [400]'
+                # plus a soft-tissue display window (W/L 400/40). The buffer
+                # already holds signed HU, so the Rescale is the identity
+                # (slope 1, intercept 0); an intercept of -1024 would display
+                # every band 1024 HU too low (#137).
+                extras=$'\n(0028,1052) DS [0]\n(0028,1053) DS [1.0]\n(0028,1054) LO [HU]\n(0028,1050) DS [40]\n(0028,1051) DS [400]'
                 ;;
             mr)
                 rows="${MR_PIXEL_ROWS}"; cols="${MR_PIXEL_COLS}"
@@ -476,7 +515,7 @@ for i in $(seq 1 "${MANIFEST_CR_COUNT}"); do
 done
 
 # ── Summary ──────────────────────────────────────────
-TOTAL=$(find "${OUTPUT_DIR}" -name "*.dcm" | wc -l)
+TOTAL=$(find "${OUTPUT_DIR}/ct" "${OUTPUT_DIR}/mr" "${OUTPUT_DIR}/cr" -name "*.dcm" | wc -l)
 echo "[generate-test-data] Generation complete: ${TOTAL} DICOM files"
 echo "[generate-test-data] CT: $(find "${OUTPUT_DIR}/ct" -name "*.dcm" | wc -l) files"
 echo "[generate-test-data] MR: $(find "${OUTPUT_DIR}/mr" -name "*.dcm" | wc -l) files"

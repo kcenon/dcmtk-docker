@@ -27,6 +27,12 @@ def git(*args):
     return subprocess.check_output(["git", *args])
 
 
+def is_commit(sha):
+    result = subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+
 def changed_paths(base, head, event):
     for sha in (base, head):
         if not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", sha):
@@ -34,6 +40,13 @@ def changed_paths(base, head, event):
     git("cat-file", "-e", head + "^{commit}")
     if event == "push" and set(base) == {"0"}:
         return None  # A new ref has no previous tree; run every suite.
+    if event == "push" and not is_commit(base):
+        # A branch moved to a commit that does not descend from its old tip
+        # (for example develop re-created from main) leaves the old tip out of
+        # the fetched history. Running every suite never approves a skip.
+        print(f"Push base {base} is not a commit in the fetched history; running every suite.",
+              file=sys.stderr)
+        return None
     if event == "pull_request":
         base = git("merge-base", base, head).decode().strip()
     data = git("diff", "--no-renames", "--name-only", "-z", base, head, "--")

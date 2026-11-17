@@ -11,8 +11,9 @@ set -uo pipefail
 #   - `dcmconv` cannot perform the requested conversion,
 #   - the output file's (0002,0010) TransferSyntaxUID does not match the
 #     requested target,
-#   - `storescu` (the SCU) cannot negotiate the resulting transfer syntax
-#     against the PACS SCP.
+#   - `storescu` (the SCU) cannot send the instance to the PACS SCP in that
+#     transfer syntax without converting it,
+#   - the PACS archives the instance in a different transfer syntax.
 #
 # Scope (intentionally minimal):
 #   - Implicit VR Little Endian      (1.2.840.10008.1.2)
@@ -126,48 +127,118 @@ convert_transfer_syntax() {
     return 1
 }
 
-# ── Helper: storescu acceptance against primary PACS ──
-# Sends a single instance proposing exactly the transfer syntax under test via
-# the matching storescu --propose-* option, so the SCP must negotiate that
-# syntax rather than fall back to a default encoding. The propose flag is
-# passed in by the caller (one of -xe / -xi / -xb).
-assert_storescu_accepts() {
+# ── Helper: storescu negotiation against primary PACS ─
+# Sends a single instance with the storescu --propose-* option for the syntax
+# under test (one of -xe / -xi / -xb). Without +C, storescu proposes that
+# syntax alone in one presentation context and, except for -xi, the other
+# uncompressed syntaxes in a fallback context. It uses a context accepted
+# with the file's own syntax if there is one; otherwise it converts the
+# dataset, sends it on the fallback context and still exits 0. The exit code
+# therefore does not show that the PACS accepted the syntax under test, so
+# require the debug line that names the context actually used and no
+# "Converting transfer syntax" line.
+# +C is not used: with one combined context dcmqrscp picks by its own
+# preference (Explicit VR Little Endian first), so the Big Endian case would
+# be converted even when the PACS supports Big Endian.
+# Args: LABEL FILE PROPOSE_FLAG EXPECTED_KEYWORD
+assert_storescu_sends() {
     local label="$1"
     local file="$2"
     local propose_flag="$3"
+    local expected_keyword="$4"
+    local log="${WORKDIR}/${label}.storescu.log"
 
     TEST_TOTAL=$((TEST_TOTAL + 1))
 
-    if storescu -aet "${MY_AE}" -aec "${PACS_AE}" "${propose_flag}" \
-            "${PACS_HOST}" "${PACS_PORT}" "${file}" >/dev/null 2>&1; then
-        print_pass "Transfer Syntax: ${label} storescu C-STORE accepted by ${PACS_AE}"
+    local rc=0
+    storescu -d -R -aet "${MY_AE}" -aec "${PACS_AE}" "${propose_flag}" \
+        "${PACS_HOST}" "${PACS_PORT}" "${file}" > "${log}" 2>&1 || rc=$?
+
+    local sent conversion success=no
+    sent=$(grep -m1 'using Presentation Context ID' "${log}" \
+        | sed -nE 's/.* with ([^ ]+) transfer syntax.*/\1/p')
+    conversion=$(grep -m1 -o 'Converting transfer syntax: .*' "${log}" \
+        | sed 's/^Converting transfer syntax: //')
+    if grep -Eq 'DIMSE Status[[:space:]]*: 0x0000: Success' "${log}"; then
+        success=yes
+    fi
+
+    if [ "${rc}" -eq 0 ] && [ "${success}" = yes ] \
+            && [ "${sent}" = "${expected_keyword}" ] && [ -z "${conversion}" ]; then
+        print_pass "Transfer Syntax: ${label} storescu sent ${sent} to ${PACS_AE} without conversion"
         TEST_PASSED=$((TEST_PASSED + 1))
         return 0
     fi
 
-    print_fail "Transfer Syntax: ${label} storescu C-STORE rejected by ${PACS_AE}"
+    print_fail "Transfer Syntax: ${label} storescu to ${PACS_AE}: exit ${rc}, success ${success}, sent ${sent:-<none>}, expected ${expected_keyword}, converted ${conversion:-no}; see ${log}"
+    TEST_FAILED=$((TEST_FAILED + 1))
+    return 1
+}
+
+# ── Helper: syntax of the instance archived by the primary PACS ─
+# The negotiation check does not show what dcmqrscp wrote, and this
+# repository patches its storage path (patches/atomic-store-filenames.patch).
+# Require exactly one archived instance with the file's SOP Instance UID,
+# stored in the expected syntax. Each case reuses the same SOP Instance UID;
+# dcmqrscp replaces the archived copy, so one copy is expected. An older copy
+# in the same syntax would also match, which matters only for the first case.
+# The search follows stored_compressed in compressed-transfer-helpers.sh.
+# Args: LABEL FILE EXPECTED_UID
+assert_pacs_stored_syntax() {
+    local label="$1"
+    local file="$2"
+    local expected_uid="$3"
+    local archive="/dicom/primary-db/${PACS_AE}"
+
+    TEST_TOTAL=$((TEST_TOTAL + 1))
+
+    local sop stored uid got="" found=0
+    sop=$(dcmdump -Un +P 0008,0018 "${file}" 2>/dev/null \
+        | sed -nE 's/.*\[([0-9.]+)\].*/\1/p')
+    if [ -n "${sop}" ] && [ -d "${archive}" ]; then
+        while IFS= read -r -d '' stored; do
+            uid=$(dcmdump -Un +P 0008,0018 "${stored}" 2>/dev/null \
+                | sed -nE 's/.*\[([0-9.]+)\].*/\1/p')
+            if [ "${uid}" = "${sop}" ]; then
+                found=$((found + 1))
+                got=$(dcmdump -Un +P 0002,0010 "${stored}" 2>/dev/null \
+                    | sed -nE 's/.*\[([0-9.]+)\].*/\1/p')
+            fi
+        done < <(find "${archive}" -type f -name '*.dcm' -print0 2>/dev/null)
+    fi
+
+    if [ "${found}" -eq 1 ] && [ "${got}" = "${expected_uid}" ]; then
+        print_pass "Transfer Syntax: ${label} ${PACS_AE} archived (0002,0010)=${got}"
+        TEST_PASSED=$((TEST_PASSED + 1))
+        return 0
+    fi
+
+    print_fail "Transfer Syntax: ${label} ${PACS_AE} archived ${found} instance(s) of ${sop:-<no SOP UID>} under ${archive} with (0002,0010)=${got:-<none>}, expected exactly 1 with ${expected_uid}"
     TEST_FAILED=$((TEST_FAILED + 1))
     return 1
 }
 
 # ── Conversion + acceptance matrix ───────────────────
-# (label, dcmconv flag, expected transfer syntax UID, storescu propose flag)
+# (label, dcmconv flag, expected transfer syntax UID, storescu propose flag,
+#  keyword storescu logs for that syntax)
 run_case() {
     local label="$1"
     local flag="$2"
     local expected_uid="$3"
     local propose_flag="$4"
+    local expected_keyword="$5"
 
     local out_file="${WORKDIR}/${label}.dcm"
 
     convert_transfer_syntax        "${label}" "${flag}" "${SOURCE_FILE}" "${out_file}" || return
     assert_transfer_syntax_uid     "${label}" "${out_file}" "${expected_uid}" || true
-    assert_storescu_accepts        "${label}" "${out_file}" "${propose_flag}" || true
+    assert_storescu_sends          "${label}" "${out_file}" "${propose_flag}" "${expected_keyword}" || true
+    assert_pacs_stored_syntax      "${label}" "${out_file}" "${expected_uid}" || true
 }
 
-run_case "explicit-vr-le" "+te" "${TS_UID_EXPLICIT_LE}" "-xe"
-run_case "implicit-vr-le" "+ti" "${TS_UID_IMPLICIT_LE}" "-xi"
-run_case "explicit-vr-be" "+tb" "${TS_UID_EXPLICIT_BE}" "-xb"
+run_case "explicit-vr-le" "+te" "${TS_UID_EXPLICIT_LE}" "-xe" "ExplicitVRLittleEndian"
+run_case "implicit-vr-le" "+ti" "${TS_UID_IMPLICIT_LE}" "-xi" "ImplicitVRLittleEndian"
+run_case "explicit-vr-be" "+tb" "${TS_UID_EXPLICIT_BE}" "-xb" "ExplicitVRBigEndian"
 
 if [ "${DICOM_TRANSFER_SYNTAX:-uncompressed}" != uncompressed ]; then
     run_compressed_case || true
