@@ -19,7 +19,7 @@ print_header "PixelData Smoke Test"
 
 # ── Skip path: feature is opt-in ──────────────────────
 if [ "${GENERATE_PIXEL_DATA}" != "true" ]; then
-    print_skip "PixelData: GENERATE_PIXEL_DATA is not 'true' (skipping smoke test)"
+    print_skip "PixelData: GENERATE_PIXEL_DATA is not 'true' in the test-client environment (skipping smoke test)"
     print_summary "PixelData"
     exit 0
 fi
