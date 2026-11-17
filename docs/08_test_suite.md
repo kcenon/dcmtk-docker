@@ -243,7 +243,7 @@ modality-appropriate display window, and a deterministic synthetic
 
 | Modality | Rows × Cols (conservative) | Rows × Cols (realistic) | BitsStored | PixelRep | Pattern | Extras |
 |----------|---------------------------|--------------------------|------------|----------|---------|--------|
-| CT       | 128 × 128                 | 512 × 512                | 16         | 1 (signed)   | 7-band signed Hounsfield ramp (-1000..1000)        | RescaleIntercept/Slope/Type, W/L 400/40 |
+| CT       | 128 × 128                 | 512 × 512                | 16         | 1 (signed)   | 7-band signed Hounsfield ramp (-1000..1000)        | RescaleIntercept 0, RescaleSlope 1.0 (stored value = HU), RescaleType HU, W/L 400/40 |
 | MR       | 128 × 128                 | 256 × 256                | 12         | 0 (unsigned) | 4-band intensity ramp (CSF .. fat)                  | W/L 4096/2048                            |
 | CR       | 224 × 224                 | 1024 × 1024              | 14         | 0 (unsigned) | Chest silhouette (thorax + lung fields + spine)     | W/L 16383/8192, PresentationLUTShape=IDENTITY |
 
@@ -267,6 +267,9 @@ docker compose exec test-client dcmdump /dicom/testdata/ct/ct_pat001_1.dcm | gre
 
 A smoke test that runs `dcm2pnm` against a generated file is included as
 `tests/test-pixeldata.sh` (auto-skipped when `GENERATE_PIXEL_DATA` is unset).
+For CT it also checks that the bands display as -1000..1000 HU after the
+Rescale tags are applied, both on the first row of stored values and through
+DCMTK's modality transform.
 Run it explicitly through the `pacs.sh` CLI once test data has been generated
 with PixelData embedded:
 
