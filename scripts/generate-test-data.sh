@@ -122,6 +122,7 @@ encode_i16_le_hex() {
 # Pattern: air(-1000) -> fat(-100) -> soft(40) -> muscle(60) -> liver(100)
 #          -> contrast(600) -> bone(1000). One-band-per-column-range, identical
 # row-to-row, so the row sequence is built once and repeated.
+# The stored values are the HU values themselves (identity Rescale, see below).
 generate_ct_buffer() {
     local rows="$1" cols="$2" outfile="$3"
     local hu_values=(-1000 -100 40 60 100 600 1000)
@@ -318,8 +319,11 @@ DUMP
                 rows="${CT_PIXEL_ROWS}"; cols="${CT_PIXEL_COLS}"
                 bits_stored=16; high_bit=15; pix_rep=1
                 # CT (PS3.3 C.8.2.1): Rescale tags map stored values to HU,
-                # plus a soft-tissue display window (W/L 400/40).
-                extras=$'\n(0028,1052) DS [-1024]\n(0028,1053) DS [1.0]\n(0028,1054) LO [HU]\n(0028,1050) DS [40]\n(0028,1051) DS [400]'
+                # plus a soft-tissue display window (W/L 400/40). The buffer
+                # already holds signed HU, so the Rescale is the identity
+                # (slope 1, intercept 0); an intercept of -1024 would display
+                # every band 1024 HU too low (#137).
+                extras=$'\n(0028,1052) DS [0]\n(0028,1053) DS [1.0]\n(0028,1054) LO [HU]\n(0028,1050) DS [40]\n(0028,1051) DS [400]'
                 ;;
             mr)
                 rows="${MR_PIXEL_ROWS}"; cols="${MR_PIXEL_COLS}"
